@@ -6,7 +6,8 @@ import {
   fetchPayment,
 } from "./payments.js";
 import { load, save as persist } from "./store.js";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { registerAuth, requireRole, sameOrigin } from "./auth.js";
 import { price, transitions } from "./domain.js";
 
 let state = load() || {
@@ -48,7 +49,7 @@ let state = load() || {
     category: p[1],
     price: p[2],
     description: p[3],
-    image: `/images/food-${i+1}.jpg`,
+    image: `/images/food-${i + 1}.jpg`,
     active: true,
   })),
   zones: [
@@ -59,7 +60,13 @@ let state = load() || {
   orders: [],
 };
 // Upgrade only the six original demo photos; preserve custom images.
-for(const p of state.products) if(p.id>=1&&p.id<=6&&p.image.startsWith('https://images.unsplash.com/'))p.image=`/images/food-${p.id}.jpg`;
+for (const p of state.products)
+  if (
+    p.id >= 1 &&
+    p.id <= 6 &&
+    p.image.startsWith("https://images.unsplash.com/")
+  )
+    p.image = `/images/food-${p.id}.jpg`;
 const save = () => persist(state);
 save();
 const app = express();
@@ -69,23 +76,18 @@ const publish = () => {
   save();
   for (const c of clients) c.write("data: update\n\n");
 };
-const auth = (req, res, next) => {
-  const expected = process.env.STAFF_TOKEN;
-  if (!expected && process.env.NODE_ENV !== "production") return next();
-  const actual = req.headers.authorization?.replace("Bearer ", "") || "";
-  if (
-    !expected ||
-    Buffer.byteLength(actual) !== Buffer.byteLength(expected) ||
-    !timingSafeEqual(Buffer.from(actual), Buffer.from(expected))
-  )
-    return res.status(401).json({ error: "Acceso de personal requerido" });
+registerAuth(app);
+app.use("/api/staff", sameOrigin, (_, res, next) => {
+  res.set("Cache-Control", "no-store");
   next();
-};
+});
+const kitchenAccess = requireRole("staff", "owner");
+const ownerAccess = requireRole("owner");
 app.get("/api/catalog", (_, res) =>
   res.json({
     products: state.products,
     zones: state.zones,
-    demo: !process.env.STAFF_TOKEN && process.env.NODE_ENV !== "production",
+    demo: false,
     digitalPayments: paymentsEnabled(),
   }),
 );
@@ -164,8 +166,8 @@ app.get("/api/orders/:id", (req, res) => {
   if (!o) return res.sendStatus(404);
   res.json(o);
 });
-app.get("/api/staff/orders", auth, (_, res) => res.json(state.orders));
-app.patch("/api/staff/orders/:id", auth, (req, res) => {
+app.get("/api/staff/orders", kitchenAccess, (_, res) => res.json(state.orders));
+app.patch("/api/staff/orders/:id", kitchenAccess, (req, res) => {
   const o = state.orders.find((o) => o.id === req.params.id);
   if (!o) return res.sendStatus(404);
   if (
@@ -184,7 +186,7 @@ app.patch("/api/staff/orders/:id", auth, (req, res) => {
   publish();
   res.json(o);
 });
-app.patch("/api/staff/products/:id", auth, (req, res) => {
+app.patch("/api/staff/products/:id", ownerAccess, (req, res) => {
   const p = state.products.find((p) => p.id === Number(req.params.id));
   if (!p) return res.sendStatus(404);
   if (
@@ -199,7 +201,7 @@ app.patch("/api/staff/products/:id", auth, (req, res) => {
   publish();
   res.json(p);
 });
-app.post("/api/staff/zones", auth, (req, res) => {
+app.post("/api/staff/zones", ownerAccess, (req, res) => {
   const b = req.body;
   if (
     !b.name?.trim() ||
@@ -214,7 +216,7 @@ app.post("/api/staff/zones", auth, (req, res) => {
   publish();
   res.status(201).json(z);
 });
-app.patch("/api/staff/zones/:id", auth, (req, res) => {
+app.patch("/api/staff/zones/:id", ownerAccess, (req, res) => {
   const z = state.zones.find((z) => z.id === Number(req.params.id));
   if (!z) return res.sendStatus(404);
   const b = req.body;
@@ -259,14 +261,20 @@ app.post("/api/payments/webhook", async (req, res) => {
   }
 });
 if (process.env.NODE_ENV === "production" || process.env.SERVE_BUILD === "1") {
- app.use('/assets',express.static('dist/assets',{immutable:true,maxAge:'1y'}));
- app.use(express.static('dist',{maxAge:0}));
-}
-else {
+  app.use(
+    "/assets",
+    express.static("dist/assets", { immutable: true, maxAge: "1y" }),
+  );
+  app.use(express.static("dist", { maxAge: 0 }));
+} else {
   const { createServer } = await import("vite");
   const vite = await createServer({ server: { middlewareMode: true } });
   app.use(vite.middlewares);
 }
-app.listen(Number(process.env.PORT) || 3000, process.env.SERVE_BUILD === "1" && process.env.NODE_ENV !== "production" ? "127.0.0.1" : "0.0.0.0", () =>
-  console.log("Los Santos listo en puerto " + (process.env.PORT || 3000)),
+app.listen(
+  Number(process.env.PORT) || 3000,
+  process.env.SERVE_BUILD === "1" && process.env.NODE_ENV !== "production"
+    ? "127.0.0.1"
+    : "0.0.0.0",
+  () => console.log("Los Santos listo en puerto " + (process.env.PORT || 3000)),
 );

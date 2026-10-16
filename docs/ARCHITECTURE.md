@@ -13,6 +13,7 @@ src/
   views/Admin.jsx          Precios, disponibilidad, colonias y métricas
 server/
   index.js                 HTTP, autorización, validación y publicación SSE
+  auth.js                  Roles, sesiones HttpOnly y protección de origen
   domain.js                Cálculo monetario y máquina de estados
   store.js                 Persistencia transaccional y carga SQLite
   schema.sql               Tablas, restricciones, relaciones e índice
@@ -65,15 +66,19 @@ stateDiagram-v2
 | GET /api/orders/:uuid         | UUID de seguimiento  | Pedido concreto y su estado                    |
 | GET /api/staff/orders         | Personal             | Lista para cocina y métricas                   |
 | PATCH /api/staff/orders/:uuid | Personal             | Transición de estado válida                    |
-| PATCH /api/staff/products/:id | Personal             | Precio y disponibilidad                        |
-| POST /api/staff/zones         | Personal             | Alta de colonia                                |
-| PATCH /api/staff/zones/:id    | Personal             | Nombre, tarifa o activación                    |
+| PATCH /api/staff/products/:id | Dueño                | Precio y disponibilidad                        |
+| POST /api/staff/zones         | Dueño                | Alta de colonia                                |
+| PATCH /api/staff/zones/:id    | Dueño                | Nombre, tarifa o activación                    |
 | POST /api/payments/webhook    | HMAC de Mercado Pago | Confirmar y actualizar estado financiero       |
 
 `POST /api/orders`: `{name, phone, delivery: 'pickup'|'delivery', zoneId?, address?, payment: 'cash'|'mp', items: [{id, quantity, notes?}]}`. La respuesta incluye UUID, folio, estado, importes y, en pagos digitales configurados, `checkoutUrl`. Los precios proporcionados por el navegador no se usan.
 
-La API exige `Authorization: Bearer STAFF_TOKEN` fuera del demo local. No es un sistema multiusuario: la separación de roles y la auditoría quedan pendientes para producción. Limitar el acceso público al entorno de desarrollo.
+El servidor aplica roles en cada ruta privada. `STAFF_TOKEN` permite cocina (lectura y estados de pedidos); `OWNER_TOKEN` permite cocina y administración (productos y colonias). El acceso permanece bloqueado si faltan claves, incluso en demo. Las claves deben ser distintas.
+
+`POST /api/auth/login` recibe `{token}` y devuelve el rol determinado por el servidor. Crea una sesión aleatoria de ocho horas en cookie HttpOnly/SameSite Strict, Secure en producción. `GET /api/auth/session` recupera el rol; `POST /api/auth/logout` invalida la sesión y elimina la cookie. Las sesiones viven en memoria. Las mutaciones con Origin de otro host se rechazan; en producción es necesario HTTPS.
+
+La UI no persiste las claves y filtra navegación y contenido por rol validado. Un cliente no recibe el listado de pedidos. Staff no puede modificar menú o colonias aunque invoque manualmente la API; esas peticiones reciben 403. Peticiones sin autenticación reciben 401. La API también acepta Bearer con la clave del rol para integraciones técnicas. Aún no hay cuentas individuales ni auditoría por persona.
 
 ## Validación
 
-`npm test` ejecuta pruebas de importes, redondeo, disponibilidad, transiciones, HMAC y una prueba integrada con servidor y base temporal. La prueba API verifica bloqueo de personal sin token, checkout, flujo cocina, cobro, conservación de precios históricos, rechazo de agotados y persistencia al reiniciar. No requiere credenciales de Mercado Pago ni modifica la base de desarrollo.
+`npm test` ejecuta pruebas de importes, redondeo, disponibilidad, transiciones, HMAC y una prueba integrada con servidor y base temporal. La prueba API verifica separación de roles, bloqueo de administración al staff, cookies y cierre de sesión, protección de origen, bloqueo sin claves incluso en desarrollo, checkout, flujo cocina, cobro, conservación de precios históricos, rechazo de agotados y persistencia al reiniciar. No requiere credenciales de Mercado Pago ni modifica la base de desarrollo.

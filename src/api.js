@@ -14,13 +14,14 @@ export async function api(path, method = "GET", body) {
     method,
     headers: {
       "Content-Type": "application/json",
-      Authorization: "Bearer " + (sessionStorage.getItem("staffToken") || ""),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!r.ok) {
     const b = await r.json().catch(() => ({}));
-    throw Error(b.error || "No se pudo completar la solicitud");
+    const error = new Error(b.error || "No se pudo completar la solicitud");
+    error.status = r.status;
+    throw error;
   }
   return r.json();
 }

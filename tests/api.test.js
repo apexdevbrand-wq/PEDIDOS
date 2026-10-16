@@ -15,9 +15,10 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
   const port = listener.address().port;
   await new Promise((r) => listener.close(r));
   const token = randomUUID();
+  const staffToken = randomUUID();
   let child;
   const base = `http://127.0.0.1:${port}`;
-  async function start() {
+  async function start(mode = "production", credentials = true) {
     child = spawn(
       process.execPath,
       [fileURLToPath(new URL("../server/index.js", import.meta.url))],
@@ -25,9 +26,11 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
         cwd: dir,
         env: {
           ...process.env,
-          NODE_ENV: "production",
+          NODE_ENV: mode,
+          SERVE_BUILD: "1",
           PORT: String(port),
-          STAFF_TOKEN: token,
+          STAFF_TOKEN: credentials ? staffToken : "",
+          OWNER_TOKEN: credentials ? token : "",
           MP_ACCESS_TOKEN: "",
           MP_WEBHOOK_SECRET: "",
         },
@@ -54,7 +57,12 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
       method,
       headers: {
         "Content-Type": "application/json",
-        ...(staff ? { Authorization: "Bearer " + token } : {}),
+        ...(staff
+          ? {
+              Authorization:
+                "Bearer " + (staff === "kitchen" ? staffToken : token),
+            }
+          : {}),
       },
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -65,6 +73,89 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
       (await request("/staff/orders", "GET", undefined, false)).status,
       401,
     );
+    assert.equal(
+      (await request("/staff/orders", "GET", undefined, "kitchen")).status,
+      200,
+    );
+    assert.equal(
+      (await request("/staff/products/1", "PATCH", { price: 1 }, "kitchen"))
+        .status,
+      403,
+    );
+    assert.equal(
+      (
+        await request(
+          "/staff/zones",
+          "POST",
+          { name: "Prohibida", fee: 100 },
+          "kitchen",
+        )
+      ).status,
+      403,
+    );
+    assert.equal(
+      (await request("/staff/zones/1", "PATCH", { fee: 100 }, "kitchen"))
+        .status,
+      403,
+    );
+    assert.equal(
+      (await request("/staff/products/1", "PATCH", { price: 1 }, false)).status,
+      401,
+    );
+    const login = await request(
+      "/auth/login",
+      "POST",
+      { token: staffToken, role: "owner" },
+      false,
+    );
+    assert.equal(login.status, 200);
+    assert.equal((await login.json()).role, "staff");
+    const cookie = login.headers.get("set-cookie").split(";")[0];
+    assert.match(login.headers.get("set-cookie"), /HttpOnly/i);
+    assert.equal(
+      (await fetch(base + "/api/staff/orders", { headers: { Cookie: cookie } }))
+        .status,
+      200,
+    );
+    assert.equal(
+      (
+        await fetch(base + "/api/staff/products/1", {
+          method: "PATCH",
+          headers: { Cookie: cookie, "Content-Type": "application/json" },
+          body: JSON.stringify({ price: 1 }),
+        })
+      ).status,
+      403,
+    );
+    assert.equal(
+      (
+        await fetch(base + "/api/auth/logout", {
+          method: "POST",
+          headers: { Cookie: cookie },
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      (await fetch(base + "/api/staff/orders", { headers: { Cookie: cookie } }))
+        .status,
+      401,
+    );
+    const ownerLogin = await request("/auth/login", "POST", { token }, false);
+    assert.equal(ownerLogin.status, 200);
+    assert.equal((await ownerLogin.json()).role, "owner");
+    assert.equal(
+      (await request("/auth/login", "POST", { token: "incorrect" }, false))
+        .status,
+      401,
+    );
+    const publicSession = await request(
+      "/auth/session",
+      "GET",
+      undefined,
+      false,
+    );
+    assert.equal((await publicSession.json()).role, "customer");
     const catalog = await (await request("/catalog")).json();
     assert.equal(catalog.demo, false);
     assert.equal(catalog.digitalPayments, false);
@@ -93,8 +184,14 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
     );
     for (const status of ["cooking", "ready", "completed"])
       assert.equal(
-        (await request("/staff/orders/" + order.id, "PATCH", { status }))
-          .status,
+        (
+          await request(
+            "/staff/orders/" + order.id,
+            "PATCH",
+            { status },
+            "kitchen",
+          )
+        ).status,
         200,
       );
     assert.equal(
@@ -131,6 +228,31 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
     assert.equal(
       (await (await request("/catalog")).json()).products[0].active,
       false,
+    );
+    const csrf = await fetch(base + "/api/staff/products/1", {
+      method: "PATCH",
+      headers: {
+        Authorization: "Bearer " + token,
+        "Content-Type": "application/json",
+        Origin: "https://untrusted.example",
+      },
+      body: JSON.stringify({ price: 1 }),
+    });
+    assert.equal(csrf.status, 403);
+    await stop();
+    await start("development", false);
+    assert.equal(
+      (await request("/staff/orders", "GET", undefined, false)).status,
+      401,
+    );
+    assert.equal(
+      (await request("/staff/products/1", "PATCH", { price: 1 }, false)).status,
+      401,
+    );
+    assert.equal(
+      (await request("/auth/login", "POST", { token: staffToken }, false))
+        .status,
+      401,
     );
   } finally {
     await stop();

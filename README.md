@@ -26,9 +26,9 @@ npm run build
 npm run demo
 ```
 
-`demo` sirve archivos compilados sin Vite, vigilancia de archivos ni HMR. Se vincula únicamente a la interfaz de loopback y mantiene el aviso de demo y el acceso abierto de personal. Detén cualquier servidor anterior del proyecto antes de arrancarlo. No uses el modo demo para operar públicamente.
+`demo` sirve archivos compilados sin Vite, vigilancia de archivos ni HMR y se vincula únicamente a la interfaz de loopback. Aplica los mismos permisos por rol que el resto de modos: no abre cocina ni administración automáticamente. Detén cualquier servidor anterior del proyecto antes de arrancarlo.
 
-El servidor atiende en el puerto 3000. `PORT` permite cambiarlo. En desarrollo, sin `STAFF_TOKEN`, la aplicación muestra explícitamente un modo demo con acceso de personal abierto. Los productos, precios y colonias iniciales son ejemplos editables.
+El servidor atiende en el puerto 3000. `PORT` permite cambiarlo. Sin sesión, solo se muestra Ordenar. Los productos, precios y colonias iniciales son ejemplos editables.
 
 ```bash
 npm test
@@ -36,7 +36,21 @@ npm run build
 npm start
 ```
 
-`npm start` usa la compilación de producción y **bloquea** los endpoints de personal si falta `STAFF_TOKEN`. Para cargar variables locales, copia `.env.example` a `.env`, completa los valores y ejecuta `NODE_ENV=production node --env-file=.env server/index.js`. Nunca subas `.env` a Git. El token se introduce en la vista de cocina o administración y se conserva en `sessionStorage`.
+`npm start` usa la compilación de producción. Para cargar variables locales, copia `.env.example` a `.env`, configura claves diferentes para `STAFF_TOKEN` y `OWNER_TOKEN` y ejecuta `NODE_ENV=production node --env-file=.env server/index.js`. Para demo usa `SERVE_BUILD=1 node --env-file=.env server/index.js`. Nunca subas `.env` a Git.
+
+## Acceso por roles
+
+| Perfil                     | Vistas disponibles      | Permisos de servidor                          |
+| -------------------------- | ----------------------- | --------------------------------------------- |
+| Cliente, sin sesión        | Ordenar                 | Catálogo, crear pedido y seguimiento por UUID |
+| Staff, clave `STAFF_TOKEN` | Cocina                  | Leer pedidos y cambiar su estado              |
+| Dueño, clave `OWNER_TOKEN` | Cocina y Administración | Pedidos, precios, disponibilidad y colonias   |
+
+El enlace **Acceso de personal** abre un formulario de autenticación; no concede permisos. El servidor determina el rol por la clave introducida, sin confiar en un rol enviado por el navegador. Después de autenticar, se muestra únicamente la navegación del rol. El dueño y el staff pueden cerrar sesión para volver al modo cliente.
+
+Genera dos claves largas e independientes (por ejemplo, `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`, una vez para cada clave) y guárdalas en las variables del servidor. No uses la misma clave para ambos roles: esa configuración se rechaza. Sin claves, el acceso privado permanece bloqueado en **todos** los modos.
+
+La autenticación crea una sesión de ocho horas, en cookie `HttpOnly`, `SameSite=Strict` y `Secure` en producción. La clave no se guarda en `sessionStorage` ni `localStorage`; salir invalida la sesión en el servidor. Las sesiones viven en memoria y se invalidan al reiniciar el servidor. Producción requiere HTTPS. La API devuelve `401` sin sesión y `403` si el rol no tiene permiso. Para integraciones técnicas también admite Bearer con la clave del rol.
 
 ## Funciones
 
@@ -67,6 +81,6 @@ Las métricas muestran importes cobrados de pedidos **creados hoy**, en `America
 
 ## Límites antes de operar públicamente
 
-Esta es una base funcional de desarrollo. El acceso compartido de personal no distingue roles: cocina y dueño comparten autorización. Antes de producción añade usuarios y roles, sesiones revocables, límites de solicitudes, protección contra abuso y pedidos duplicados, registro de auditoría, aviso de privacidad y política de retención, conciliación de pagos y monitoreo. Las notificaciones son actualizaciones dentro de la aplicación conectada; no se envían WhatsApp, SMS ni push al repartidor. El seguimiento usa un UUID como enlace secreto: no lo compartas ni lo registres en analítica pública.
+Esta es una base funcional de desarrollo. La autorización distingue staff y dueño, con una clave compartida por rol. Antes de producción añade cuentas individuales con administración de usuarios y recuperación de acceso, límites de solicitudes y de inicio de sesión, protección contra abuso y pedidos duplicados, registro de auditoría, aviso de privacidad y política de retención, conciliación de pagos y monitoreo. Las notificaciones son actualizaciones dentro de la aplicación conectada; no se envían WhatsApp, SMS ni push al repartidor. El seguimiento usa un UUID como enlace secreto: no lo compartas ni lo registres en analítica pública.
 
 Sustituye el menú, tarifas, fotografías de referencia e identidad tipográfica por los recursos reales del negocio. La referencia de marca se interpretó en rojo, crema, blanco y amarillo; no se dispone del archivo oficial del logotipo en el repositorio.
