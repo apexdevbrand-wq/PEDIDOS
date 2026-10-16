@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { ShoppingBag, Minus, Plus, ArrowRight, Check } from "lucide-react";
-import { api, money, labels } from "../api";
+import { api, money } from "../api";
+import Tracking from "./Tracking";
+import { price as calculate } from "../../server/domain.js";
 export default function Cart({
   cart,
   setCart,
@@ -16,15 +18,35 @@ export default function Cart({
   useEffect(() => {
     setCart((c) =>
       c.map((i) => {
-        const product = catalog.products.find((p) => p.id === i.id);
-        return product ? { ...i, price: product.price } : i;
+        const p = catalog.products.find((p) => p.id === i.id);
+        if (!p) return { ...i, available: false };
+        try {
+          const line = calculate(
+            [{ id: i.id, quantity: 1, selections: i.selections || {} }],
+            [p],
+            null,
+            "pickup",
+            "cash",
+          ).lines[0];
+          return {
+            ...i,
+            price: line.price,
+            basePrice: line.basePrice,
+            optionLabels: line.optionLabels,
+            available: true,
+          };
+        } catch {
+          return { ...i, available: false };
+        }
       }),
     );
   }, [catalog.products]);
-  const qty = (id, d) =>
+  const qty = (lineKey, d) =>
     setCart((c) =>
       c
-        .map((i) => (i.id === id ? { ...i, quantity: i.quantity + d } : i))
+        .map((i) =>
+          i.lineKey === lineKey ? { ...i, quantity: i.quantity + d } : i,
+        )
         .filter((i) => i.quantity > 0),
     );
   const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0),
@@ -38,22 +60,48 @@ export default function Cart({
     if (busy) return;
     setBusy(true);
     const f = new FormData(e.target);
+    const data = {
+      name: f.get("name"),
+      phone: f.get("phone"),
+      address: f.get("address"),
+      delivery,
+      zoneId,
+      payment,
+      expectedTotal: subtotal + shipping + surcharge,
+      items: cart.map(({ id, quantity, notes, selections }) => ({
+        id,
+        quantity,
+        notes,
+        selections,
+      })),
+    };
+    const bytes = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(
+        JSON.stringify({ ...data, expectedTotal: undefined }),
+      ),
+    );
+    const fingerprint = Array.from(new Uint8Array(bytes))
+      .map((v) => v.toString(16).padStart(2, "0"))
+      .join("");
+    let request;
+    try {
+      request = JSON.parse(
+        sessionStorage.getItem("checkout-request") || "null",
+      );
+    } catch {}
+    if (!request || request.fingerprint !== fingerprint) {
+      request = { fingerprint, id: crypto.randomUUID() };
+      sessionStorage.setItem("checkout-request", JSON.stringify(request));
+    }
     const o = await run(() =>
-      api("/orders", "POST", {
-        name: f.get("name"),
-        phone: f.get("phone"),
-        address: f.get("address"),
-        delivery,
-        zoneId,
-        payment,
-        expectedTotal: subtotal + shipping + surcharge,
-        items: cart.map(({ id, quantity, notes }) => ({ id, quantity, notes })),
-      }),
+      api("/orders", "POST", { ...data, requestId: request.id }),
     );
     if (o) {
       localStorage.setItem("tracking", o.id);
       setTracking(o);
       setCart([]);
+      sessionStorage.removeItem("checkout-request");
       if (o.checkoutUrl) window.location.assign(o.checkoutUrl);
     }
     setBusy(false);
@@ -68,28 +116,14 @@ export default function Cart({
         <span>{cart.reduce((s, i) => s + i.quantity, 0)}</span>
       </div>
       {tracking && (
-        <section className="tracking" aria-live="polite">
-          <small>TU PEDIDO · {tracking.folio}</small>
-          <h3>
-            {tracking.status === "ready"
-              ? tracking.delivery === "delivery"
-                ? "En camino"
-                : "Listo para recoger"
-              : labels[tracking.status]}
-          </h3>
-          <p>
-            {money(tracking.total)} ·{" "}
-            {tracking.paymentStatus === "paid" ? "Pagado" : "Pago pendiente"}
-          </p>
-          <button
-            onClick={() => {
-              localStorage.removeItem("tracking");
-              setTracking(null);
-            }}
-          >
-            Ocultar seguimiento
-          </button>
-        </section>
+        <Tracking
+          order={tracking}
+          timezone={catalog.settings?.timezone}
+          onHide={() => {
+            localStorage.removeItem("tracking");
+            setTracking(null);
+          }}
+        />
       )}
       {!cart.length ? (
         <div className="empty">
@@ -104,15 +138,26 @@ export default function Cart({
       ) : (
         <form onSubmit={submit}>
           {cart.map((i) => (
-            <div className="cart-item" key={i.id}>
+            <div className="cart-item" key={i.lineKey}>
               <div className="line">
                 <b>{i.name}</b>
                 <span>{money(i.price * i.quantity)}</span>
               </div>
+              {(i.optionLabels || []).map((label) => (
+                <small className="cart-option" key={label}>
+                  {label}
+                </small>
+              ))}
+              {!i.available && (
+                <p className="notice">
+                  Este platillo o alguna opción se agotó. Retíralo y elige otra
+                  opción.
+                </p>
+              )}
               <div className="quantity">
                 <button
                   type="button"
-                  onClick={() => qty(i.id, -1)}
+                  onClick={() => qty(i.lineKey, -1)}
                   aria-label={"Quitar uno de " + i.name}
                 >
                   <Minus size={14} />
@@ -121,7 +166,7 @@ export default function Cart({
                 <button
                   type="button"
                   disabled={i.quantity >= 30}
-                  onClick={() => qty(i.id, 1)}
+                  onClick={() => qty(i.lineKey, 1)}
                   aria-label={"Añadir uno de " + i.name}
                 >
                   <Plus size={14} />
@@ -135,7 +180,9 @@ export default function Cart({
                 onChange={(e) =>
                   setCart((c) =>
                     c.map((x) =>
-                      x.id === i.id ? { ...x, notes: e.target.value } : x,
+                      x.lineKey === i.lineKey
+                        ? { ...x, notes: e.target.value }
+                        : x,
                     ),
                   )
                 }
@@ -264,7 +311,12 @@ export default function Cart({
           </div>
           <button
             className="primary checkout"
-            disabled={busy || (payment === "mp" && !catalog.digitalPayments)}
+            disabled={
+              busy ||
+              cart.some((i) => !i.available) ||
+              catalog.availability?.open === false ||
+              (payment === "mp" && !catalog.digitalPayments)
+            }
           >
             {busy ? "Confirmando…" : "Confirmar pedido"}
             <ArrowRight size={18} />

@@ -8,6 +8,7 @@ import Admin from "./views/Admin";
 import "./style.css";
 // Retire the old shared browser credential; authorization now lives in an HttpOnly session.
 sessionStorage.removeItem("staffToken");
+const personal = /^\/personal\/?$/.test(location.pathname);
 function App() {
   const [view, setView] = useState("shop"),
     [role, setRole] = useState("customer"),
@@ -16,12 +17,12 @@ function App() {
     [error, setError] = useState(""),
     [tracking, setTracking] = useState(null),
     [connected, setConnected] = useState(false),
-    [loginOpen, setLoginOpen] = useState(false),
     [key, setKey] = useState(""),
+    [username, setUsername] = useState("dueno"),
+    [user, setUser] = useState(null),
     [loginError, setLoginError] = useState(""),
     [busy, setBusy] = useState(false);
-  const epoch = useRef(0),
-    dialog = useRef(null);
+  const epoch = useRef(0);
   const staff = role === "staff" || role === "owner";
   const safeView =
     role === "customer"
@@ -29,7 +30,8 @@ function App() {
       : role === "owner" && view === "admin"
         ? "admin"
         : "kitchen";
-  function changeRole(next) {
+  function changeRole(next, actor = null) {
+    setUser(actor);
     epoch.current++;
     setRole(next);
     setView(next === "customer" ? "shop" : "kitchen");
@@ -37,10 +39,12 @@ function App() {
     setError("");
   }
   useEffect(() => {
+    if (!personal) return;
     const version = epoch.current;
     api("/auth/session")
       .then((s) => {
-        if (version === epoch.current && s.role !== "customer") changeRole(s.role);
+        if (version === epoch.current && s.role !== "customer")
+          changeRole(s.role, s.user);
       })
       .catch(() => {});
   }, []);
@@ -54,7 +58,7 @@ function App() {
         const nextOrders = await api("/staff/orders");
         if (version !== epoch.current) return;
         setOrders(nextOrders);
-      } else {
+      } else if (!personal) {
         const id = localStorage.getItem("tracking");
         if (id) {
           const order = await api("/orders/" + id);
@@ -70,16 +74,16 @@ function App() {
   useEffect(() => {
     refresh();
     const source = new EventSource("/api/events");
-    source.onopen = () => setConnected(true);
+    let opened = false;
+    source.onopen = () => {
+      setConnected(true);
+      if (opened) refresh();
+      opened = true;
+    };
     source.onerror = () => setConnected(false);
     source.onmessage = () => refresh();
     return () => source.close();
   }, [safeView, role]);
-  useEffect(() => {
-    if (loginOpen) {
-      dialog.current?.showModal();
-    } else if (dialog.current?.open) dialog.current.close();
-  }, [loginOpen]);
   async function run(fn) {
     setError("");
     try {
@@ -92,8 +96,9 @@ function App() {
   }
   const update = (path, body) =>
     run(async () => {
-      await api(path, "PATCH", body);
+      const result = await api(path, "PATCH", body);
       await refresh();
+      return result;
     });
   async function login(e) {
     e.preventDefault();
@@ -101,10 +106,12 @@ function App() {
     setBusy(true);
     setLoginError("");
     try {
-      const session = await api("/auth/login", "POST", { token: key });
-      changeRole(session.role);
+      const session = await api("/auth/login", "POST", {
+        username,
+        password: key,
+      });
+      changeRole(session.role, session.user);
       setKey("");
-      setLoginOpen(false);
     } catch (e) {
       setLoginError(e.message);
     } finally {
@@ -125,16 +132,61 @@ function App() {
           ? [["admin", "Administración", LayoutDashboard]]
           : []),
       ]
-    : [["shop", "Ordenar", UtensilsCrossed]];
+    : personal
+      ? []
+      : [["shop", "Ordenar", UtensilsCrossed]];
+  const loginForm = (
+    <form onSubmit={login}>
+      <span className="eyebrow">ACCESO RESTRINGIDO</span>
+      <h2 id="login-title">Personal de Los Santos</h2>
+      <p className="muted">
+        Ingresa tu usuario y contraseña. Tus permisos se validan en el servidor.
+      </p>
+      <label>
+        Usuario
+        <input
+          required
+          autoComplete="username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          maxLength={40}
+        />
+      </label>
+      <label>
+        Contraseña
+        <input
+          required
+          autoComplete="current-password"
+          type="password"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          maxLength={256}
+        />
+      </label>
+      {loginError && (
+        <p role="alert" className="notice">
+          {loginError}
+        </p>
+      )}
+      <div className="login-actions">
+        <a href="/">Volver al catálogo</a>
+        <button className="primary" disabled={busy}>
+          {busy ? "Verificando…" : "Iniciar sesión"}
+        </button>
+      </div>
+    </form>
+  );
   return (
     <>
       <header>
         <a
           className="brand"
-          href="#"
+          href="/"
           onClick={(e) => {
-            e.preventDefault();
-            setView(staff ? "kitchen" : "shop");
+            if (staff) {
+              e.preventDefault();
+              setView("kitchen");
+            }
           }}
         >
           <span className="halo">◒</span>
@@ -160,7 +212,10 @@ function App() {
         </nav>
         {staff ? (
           <div className="session-controls">
-            <span>{role === "owner" ? "Dueño" : "Staff de cocina"}</span>
+            <span>
+              {user?.displayName ||
+                (role === "owner" ? "Dueño" : "Staff de cocina")}
+            </span>
             <button onClick={logout}>Cerrar sesión</button>
           </div>
         ) : (
@@ -176,7 +231,11 @@ function App() {
           <button onClick={() => setError("")}>Cerrar</button>
         </div>
       )}
-      {safeView === "shop" ? (
+      {personal && !staff ? (
+        <main className="personal-login">
+          <section className="personal-card">{loginForm}</section>
+        </main>
+      ) : safeView === "shop" ? (
         <Shop
           catalog={catalog}
           run={run}
@@ -184,7 +243,14 @@ function App() {
           setTracking={setTracking}
         />
       ) : safeView === "kitchen" && staff ? (
-        <Kitchen orders={orders} update={update} connected={connected} />
+        <Kitchen
+          orders={orders}
+          update={update}
+          connected={connected}
+          catalog={catalog}
+          run={run}
+          refresh={refresh}
+        />
       ) : role === "owner" ? (
         <Admin
           catalog={catalog}
@@ -197,69 +263,14 @@ function App() {
       <footer>
         <b>Los Santos.</b>
         <span>El punto de encuentro de tus antojos.</span>
-        {!staff && (
-          <button
-            className="staff-entry"
-            onClick={() => {
-              setLoginError("");
-              setKey("");
-              setLoginOpen(true);
-            }}
-          >
-            Acceso de personal
-          </button>
-        )}
         <small>PRECIOS EN MXN · IMÁGENES ILUSTRATIVAS</small>
       </footer>
-      <dialog
-        ref={dialog}
-        className="login-dialog"
-        aria-labelledby="login-title"
-        onCancel={() => setLoginOpen(false)}
-      >
-        <form onSubmit={login}>
-          <span className="eyebrow">ACCESO RESTRINGIDO</span>
-          <h2 id="login-title">Personal de Los Santos</h2>
-          <p className="muted">
-            Ingresa tu clave de cocina o de dueño. Tus permisos se validan en el
-            servidor.
-          </p>
-          <label>
-            Clave de acceso
-            <input
-              autoFocus
-              required
-              autoComplete="current-password"
-              type="password"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              maxLength={512}
-            />
-          </label>
-          {loginError && (
-            <p role="alert" className="notice">
-              {loginError}
-            </p>
-          )}
-          <div className="login-actions">
-            <button
-              type="button"
-              onClick={() => {
-                setKey("");
-                setLoginOpen(false);
-              }}
-            >
-              Cancelar
-            </button>
-            <button className="primary" disabled={busy}>
-              {busy ? "Verificando…" : "Iniciar sesión"}
-            </button>
-          </div>
-        </form>
-      </dialog>
     </>
   );
 }
 createRoot(document.getElementById("root")).render(<App />);
-if (import.meta.env.PROD && "serviceWorker" in navigator)
+const tracked = new URLSearchParams(location.search).get("order");
+if (tracked && /^[a-f0-9-]{36}$/i.test(tracked))
+  localStorage.setItem("tracking", tracked);
+if (window.isSecureContext && "serviceWorker" in navigator)
   navigator.serviceWorker.register("/sw.js").catch(() => {});

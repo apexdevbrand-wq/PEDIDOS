@@ -17,8 +17,12 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
   const token = randomUUID();
   const staffToken = randomUUID();
   let child;
+  let output = "",
+    spawnError;
   const base = `http://127.0.0.1:${port}`;
   async function start(mode = "production", credentials = true) {
+    output = "";
+    spawnError = null;
     child = spawn(
       process.execPath,
       [fileURLToPath(new URL("../server/index.js", import.meta.url))],
@@ -34,16 +38,33 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
           MP_ACCESS_TOKEN: "",
           MP_WEBHOOK_SECRET: "",
         },
-        stdio: "ignore",
+        stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    for (let i = 0; i < 60; i++) {
+    for (const stream of [child.stdout, child.stderr])
+      stream.on("data", (b) => {
+        output = (output + b.toString()).slice(-12000);
+      });
+    child.on("error", (e) => {
+      spawnError = e;
+    });
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      if (spawnError || child.exitCode !== null || child.signalCode !== null)
+        throw Error("Fallo de arranque: " + (spawnError?.message || output));
       try {
-        if ((await fetch(base + "/api/catalog")).ok) return;
+        if (
+          (
+            await fetch(base + "/api/catalog", {
+              signal: AbortSignal.timeout(1000),
+            })
+          ).ok
+        )
+          return;
       } catch {}
-      await delay(50);
+      await delay(100);
     }
-    throw Error("El servidor no arrancó");
+    throw Error("El servidor no respondió en 30 segundos. " + output);
   }
   async function stop() {
     const proc = child;
@@ -160,6 +181,7 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
     assert.equal(catalog.demo, false);
     assert.equal(catalog.digitalPayments, false);
     const body = {
+      requestId: randomUUID(),
       name: "Prueba API",
       phone: "5512345678",
       delivery: "delivery",
@@ -210,10 +232,26 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
       (await request("/staff/products/1", "PATCH", { active: false })).status,
       200,
     );
-    assert.equal((await request("/orders", "POST", body, false)).status, 400);
     assert.equal(
-      (await request("/orders", "POST", { ...body, payment: "mp" }, false))
-        .status,
+      (
+        await request(
+          "/orders",
+          "POST",
+          { ...body, requestId: randomUUID() },
+          false,
+        )
+      ).status,
+      400,
+    );
+    assert.equal(
+      (
+        await request(
+          "/orders",
+          "POST",
+          { ...body, requestId: randomUUID(), payment: "mp" },
+          false,
+        )
+      ).status,
       400,
     );
     assert.equal(

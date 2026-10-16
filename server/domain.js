@@ -15,10 +15,42 @@ export function price(items, products, zone, delivery, payment) {
       i.quantity > 30
     )
       throw Error("Producto no disponible o cantidad inválida");
+    const selections = i.selections || {};
+    if (
+      typeof selections !== "object" ||
+      Array.isArray(selections) ||
+      Object.keys(selections).some(
+        (key) => !(p.options || []).some((g) => g.id === key),
+      )
+    )
+      throw Error("Opciones desconocidas");
+    const optionLabels = [];
+    let extras = 0;
+    for (const group of p.options || []) {
+      const ids = selections[group.id] || [];
+      if (
+        !Array.isArray(ids) ||
+        new Set(ids).size !== ids.length ||
+        ids.length < group.min ||
+        ids.length > group.max
+      )
+        throw Error("Revisa las opciones de " + group.name);
+      for (const id of ids) {
+        const choice = group.choices.find(
+          (c) => c.id === id && c.active !== false,
+        );
+        if (!choice) throw Error("Opción no disponible");
+        extras += choice.price;
+        optionLabels.push(group.name + ": " + choice.label);
+      }
+    }
     return {
       id: p.id,
       name: p.name,
-      price: p.price,
+      price: p.price + extras,
+      basePrice: p.price,
+      selections,
+      optionLabels,
       quantity: i.quantity,
       notes: String(i.notes || "").slice(0, 300),
     };

@@ -1,84 +1,67 @@
-# Arquitectura
+# Arquitectura y contratos
 
-## Capas y archivos
+## Tres módulos y capas
 
-```text
-src/
-  main.jsx                 Shell, navegación entre las tres vistas, SSE y errores
-  api.js                   Cliente HTTP, dinero, estados y fechas locales
-  style.css                Tailwind + estilos de componentes y breakpoints
-  components/Cart.jsx      Carrito, entrega, pago, checkout y seguimiento
-  views/Shop.jsx           Catálogo y presentación de marca
-  views/Kitchen.jsx        KDS cronológico y transiciones de pedido
-  views/Admin.jsx          Precios, disponibilidad, colonias y métricas
-server/
-  index.js                 HTTP, autorización, validación y publicación SSE
-  auth.js                  Roles, sesiones HttpOnly y protección de origen
-  domain.js                Cálculo monetario y máquina de estados
-  store.js                 Persistencia transaccional y carga SQLite
-  schema.sql               Tablas, restricciones, relaciones e índice
-  payments.js              Checkout Pro, firma de webhook y consulta de pagos
-public/                    Manifest, service worker, icono y recursos locales
-tests/                     Pruebas de dominio, firma y API con SQLite temporal
-data/                      Estado persistente local, fuera del control de versiones
-```
+- `src/views/Shop.jsx`: catálogo, variantes de carrito y configuración de productos; `Cart.jsx` crea compras con clave persistente; `Tracking.jsx` muestra seguimiento, rechazo, estimación, push y comprobante.
+- `src/views/Kitchen.jsx`: flujo cronológico, sonido, tiempos, rechazo, WhatsApp manual y tickets. `useKitchenSound.js` crea un único contexto de audio por activación y lo cierra al salir.
+- `src/views/Admin.jsx`: secciones internas de caja, menú/colonias, negocio/insumos, equipo/auditoría y respaldos. No son módulos públicos adicionales.
+- `server/domain.js`: cálculo en centavos y transiciones; la UI comparte esa función pura para actualizar el carrito, pero el servidor recalcula independientemente.
+- `server/operations.js`: disponibilidad efectiva, horarios nocturnos, configuración, opciones, fingerprint de compra y reportes.
+- `server/auth.js`: bootstrap, scrypt, cuentas, sesiones, roles, limitación de intentos y revocación por versión de usuario.
+- `server/management.js`: operación, reportes, cierres y respaldos; `messages.js` prepara texto y HTML escapado.
+- `server/push.js`: VAPID persistido, validación de endpoints y cola durable con hasta tres intentos; el envío se ejecuta fuera de la mutación del pedido.
+- `server/store.js` / `schema.sql`: SQLite WAL, migraciones, transacciones, respaldo nativo consistente.
+- `scripts/`: inicio portable, configuración local, recuperación del dueño y restauración. `lock.js` impide dos instancias sobre la misma base.
 
-Un mismo origen sirve React y `/api`, evitando CORS y separando los secretos de la compilación del navegador. Las mutaciones publican una señal SSE sin datos personales; cada vista vuelve a consultar únicamente los endpoints que tiene autorizados. SSE se reconecta automáticamente. El seguimiento se recupera al abrir la app con el UUID guardado en localStorage.
+Un mismo origen sirve frontend y API. El catálogo público `/` no incluye botón ni enlace de personal y permanece público aunque ese navegador tenga una sesión de equipo. `/personal` sirve el formulario independiente y recupera la sesión de cocina/dueño; conocer su URL no sustituye autenticación. SSE difunde solo una señal, sin datos privados; cada cliente vuelve a consultar las rutas autorizadas. El catálogo y estado de recepción también se refrescan cada minuto para reflejar horarios/pausas que expiran.
 
-## Modelo relacional implementado
+## Datos persistentes
 
-```mermaid
-erDiagram
-  PRODUCTS ||--o{ ORDER_ITEMS : referencia
-  ORDERS ||--|{ ORDER_ITEMS : contiene
-  ZONES ||--o{ ORDERS : cobertura
-  PRODUCTS { int id PK int price bool active string name string category }
-  ZONES { int id PK string name int fee bool active }
-  ORDERS { string id PK string folio UK int zone_id FK string zone_name string status string payment_status int subtotal int shipping int surcharge int total }
-  ORDER_ITEMS { string order_id PK,FK int position PK int product_id FK string product_name int unit_price int quantity string notes }
-```
+| Tabla              | Contenido                                                                                                                  |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| products           | Precio base, imagen, categoría y activación; JSON de opciones y relaciones de insumos                                      |
+| zones              | Nombre, costo y activación                                                                                                 |
+| orders             | UUID de seguimiento, folio, cliente, entrega, importes y estados; clave única de compra y JSON de estimación/rechazo/pagos |
+| order_items        | Nombre/precio/cantidad/notas históricos y JSON de opciones seleccionadas                                                   |
+| app_meta           | Operación, insumos, cortes y claves VAPID internas (no se devuelven al cliente)                                            |
+| users              | Usuario único, nombre, rol, hash scrypt, sal, activación y versión de sesión                                               |
+| audit_log          | Fecha, actor, acción, objetivo y detalles sin contraseñas                                                                  |
+| push_subscriptions | Endpoint cifrable y claves públicas del dispositivo por pedido                                                             |
+| push_jobs          | Avisos pendientes, intentos y estado de entrega al proveedor                                                               |
 
-Todos los importes son enteros en centavos MXN. Cada línea captura nombre, precio unitario, cantidad y notas al comprar. El pedido captura el nombre de la colonia y el importe de envío para preservar su historia, mientras `zone_id` mantiene la relación aunque se renombre. El folio legible es independiente del UUID de seguimiento. Las restricciones exactas están en `server/schema.sql`.
+La clave de compra tiene índice UNIQUE. Su fingerprint normaliza campos de intención, sin confiar en totales enviados. Un reintento con la misma clave devuelve el pedido existente aunque hayan cambiado precios, horarios o disponibilidad; cambiar su contenido genera 409. Una exclusión en memoria evita crear preferencias de pago concurrentes para esa compra en la única instancia. Una compra nueva requiere clave nueva.
 
-Se usa SQLite WAL, claves foráneas y transacciones `BEGIN IMMEDIATE`. La instancia carga su estado en memoria; cada cambio lo persiste transaccionalmente. Es apropiado para esta base de una sola instancia y volumen bajo. Para crecer: repositorios con consultas por entidad, paginación, PostgreSQL y eventos compartidos mediante Redis; no levantar varias instancias que mantengan cachés independientes.
+Las líneas capturan precios y nombres de opciones al crear el pedido. Cambiar menú o insumos no altera pedidos previos. `zone_id` mantiene la relación si se renombra una colonia, mientras `zone_name` conserva la entrega original. Disponibilidad es booleana, sin inventario cuantitativo.
 
-## Estados
+## Estados y finanzas
 
-```mermaid
-stateDiagram-v2
-  [*] --> pending
-  pending --> cooking: Aceptar y preparar
-  pending --> rejected: Rechazar
-  cooking --> ready: Listo / En camino
-  cooking --> rejected: Rechazar
-  ready --> completed: Confirmar entrega y cobro
-```
+`pending → cooking → ready → completed`, con rechazo desde pending o cooking. Aceptar establece hora estimada; rechazar exige motivo y registra si hace falta reembolso. `ready` significa En camino para domicilio y Listo para recoger para pickup. Efectivo se marca cobrado al confirmar entrega. MP se confirma exclusivamente por webhook firmado y consulta al proveedor.
 
-`ready` se presenta al cliente como **En camino** en delivery y **Listo para recoger** en takeout. El estado financiero es independiente: `unpaid`, `paid`, `refunded`, `charged_back`. Efectivo se marca cobrado al completar la entrega; Mercado Pago solo mediante webhook verificado. Rechazar no devuelve dinero ni emite cupones automáticamente.
+Estado financiero independiente: unpaid, paid, refunded, charged_back. Se conserva la fecha de cobro y eventos incrementales de devolución. Un reembolso posterior no borra el cobro histórico: afecta el neto de su fecha de devolución. Los reportes separan recibido, devoluciones, neto, productos, envío y recargo. El corte guarda una fotografía desde el último cierre con efectivo contado y responsable. No reemplaza contabilidad fiscal ni conciliación bancaria.
 
-## API
+## Rutas principales
 
-| Método / ruta                 | Acceso               | Propósito                                      |
-| ----------------------------- | -------------------- | ---------------------------------------------- |
-| GET /api/catalog              | Público              | Productos, cobertura y capacidades del entorno |
-| GET /api/events               | Público              | Señales SSE, sin contenido de los pedidos      |
-| POST /api/orders              | Público              | Validar checkout, recalcular y crear pedido    |
-| GET /api/orders/:uuid         | UUID de seguimiento  | Pedido concreto y su estado                    |
-| GET /api/staff/orders         | Personal             | Lista para cocina y métricas                   |
-| PATCH /api/staff/orders/:uuid | Personal             | Transición de estado válida                    |
-| PATCH /api/staff/products/:id | Dueño                | Precio y disponibilidad                        |
-| POST /api/staff/zones         | Dueño                | Alta de colonia                                |
-| PATCH /api/staff/zones/:id    | Dueño                | Nombre, tarifa o activación                    |
-| POST /api/payments/webhook    | HMAC de Mercado Pago | Confirmar y actualizar estado financiero       |
+| Ruta                                                                              | Acceso                                            |
+| --------------------------------------------------------------------------------- | ------------------------------------------------- |
+| GET /api/catalog, /api/events, /api/push/key                                      | Público, sin datos de otros pedidos               |
+| POST /api/orders                                                                  | Público, con requestId de compra                  |
+| GET /api/orders/:uuid, /api/orders/:uuid/ticket                                   | UUID secreto de seguimiento                       |
+| POST/DELETE /api/orders/:uuid/push                                                | UUID de seguimiento y suscripción del dispositivo |
+| POST /api/auth/login, /api/auth/logout; GET /api/auth/session                     | Autenticación individual y sesión                 |
+| GET /api/staff/orders; PATCH /api/staff/orders/:id                                | Cocina y dueño                                    |
+| POST /api/staff/pause                                                             | Cocina y dueño, solo pausa de 0–120 minutos       |
+| GET /api/staff/orders/:id/whatsapp, /ticket                                       | Cocina y dueño                                    |
+| PATCH /api/staff/products/:id; PUT /api/staff/products/:id/options                | Dueño                                             |
+| POST/PATCH /api/staff/zones[/:id]                                                 | Dueño                                             |
+| PATCH /api/staff/settings; GET/POST/PATCH /api/staff/ingredients[/:id]            | Dueño                                             |
+| GET/POST/PATCH /api/staff/users[/:id]; GET /api/staff/audit                       | Dueño                                             |
+| GET /api/staff/reports?date=YYYY-MM-DD[&format=csv]; GET/POST /api/staff/closures | Dueño                                             |
+| GET/POST /api/staff/backups; GET /api/staff/backups/:filename                     | Dueño                                             |
 
-`POST /api/orders`: `{name, phone, delivery: 'pickup'|'delivery', zoneId?, address?, payment: 'cash'|'mp', items: [{id, quantity, notes?}]}`. La respuesta incluye UUID, folio, estado, importes y, en pagos digitales configurados, `checkoutUrl`. Los precios proporcionados por el navegador no se usan.
+No sesión → 401; rol sin permiso → 403. Mutaciones privadas verifican Origin. Las cookies son HttpOnly, SameSite Strict y Secure en producción. Desactivar/cambiar una cuenta incrementa su versión y revoca sesiones. Los hashes y la clave privada VAPID nunca aparecen en la API; los respaldos descargables por el dueño sí contienen la base completa y deben protegerse.
 
-El servidor aplica roles en cada ruta privada. `STAFF_TOKEN` permite cocina (lectura y estados de pedidos); `OWNER_TOKEN` permite cocina y administración (productos y colonias). El acceso permanece bloqueado si faltan claves, incluso en demo. Las claves deben ser distintas.
+## Pruebas y límites
 
-`POST /api/auth/login` recibe `{token}` y devuelve el rol determinado por el servidor. Crea una sesión aleatoria de ocho horas en cookie HttpOnly/SameSite Strict, Secure en producción. `GET /api/auth/session` recupera el rol; `POST /api/auth/logout` invalida la sesión y elimina la cookie. Las sesiones viven en memoria. Las mutaciones con Origin de otro host se rechazan; en producción es necesario HTTPS.
+Las pruebas usan servidores y bases temporales, puertos libres y diagnóstico de arranque con espera de 30 segundos. Cubren la API real, reintentos tras reinicio, roles, usuarios, caja, backups/restauración, importes, horarios y el service worker de push. El navegador verifica compra personalizada, recepción/cocina, impresión, rechazo visible, WhatsApp sin enviar, insumos, pausa, cuentas, cierre y responsividad.
 
-La UI no persiste las claves y filtra navegación y contenido por rol validado. Un cliente no recibe el listado de pedidos. Staff no puede modificar menú o colonias aunque invoque manualmente la API; esas peticiones reciben 403. Peticiones sin autenticación reciben 401. La API también acepta Bearer con la clave del rol para integraciones técnicas. Aún no hay cuentas individuales ni auditoría por persona.
-
-## Validación
-
-`npm test` ejecuta pruebas de importes, redondeo, disponibilidad, transiciones, HMAC y una prueba integrada con servidor y base temporal. La prueba API verifica separación de roles, bloqueo de administración al staff, cookies y cierre de sesión, protección de origen, bloqueo sin claves incluso en desarrollo, checkout, flujo cocina, cobro, conservación de precios históricos, rechazo de agotados y persistencia al reiniciar. No requiere credenciales de Mercado Pago ni modifica la base de desarrollo.
+Persistencia pensada para una instancia y volumen bajo: el estado operativo se carga en memoria y cada mutación se persiste transaccionalmente. Para múltiples instancias o un historial grande habrá que migrar a consultas/paginación por entidad y eventos compartidos. Las sesiones no sobreviven al reinicio. Requieren validación externa: cobro/reembolso MP con credenciales, entrega push en teléfonos reales, impresión física y DNS/HTTPS del despliegue.

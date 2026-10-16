@@ -1,22 +1,89 @@
 import React, { useState } from "react";
 import { ArrowRight, Clock, MapPin, Plus } from "lucide-react";
 import Cart from "../components/Cart";
+import ProductOptions from "../components/ProductOptions";
 import { money } from "../api";
 export default function Shop({ catalog, run, tracking, setTracking }) {
   const [category, setCategory] = useState("Todo"),
-    [cart, setCart] = useState([]);
-  const add = (p) =>
-    setCart((c) =>
-      c.some((i) => i.id === p.id)
-        ? c.map((i) =>
-            i.id === p.id
+    [customize, setCustomize] = useState(null),
+    [cart, setCart] = useState(() => {
+      try {
+        return JSON.parse(sessionStorage.getItem("cart") || "[]");
+      } catch {
+        return [];
+      }
+    });
+  React.useEffect(() => {
+    sessionStorage.setItem("cart", JSON.stringify(cart));
+  }, [cart]);
+  function add(p, selections = {}, notes = "") {
+    const optionLabels = [];
+    let extra = 0;
+    for (const g of p.options || [])
+      for (const id of selections[g.id] || []) {
+        const c = g.choices.find((c) => c.id === id);
+        if (c) {
+          extra += c.price;
+          optionLabels.push(g.name + ": " + c.label);
+        }
+      }
+    const lineKey =
+      p.id +
+      "-" +
+      JSON.stringify(Object.fromEntries(Object.entries(selections).sort())) +
+      "-" +
+      notes;
+    setCart((current) =>
+      current.some((i) => i.lineKey === lineKey)
+        ? current.map((i) =>
+            i.lineKey === lineKey
               ? { ...i, quantity: Math.min(30, i.quantity + 1) }
               : i,
           )
-        : [...c, { ...p, quantity: 1, notes: "" }],
+        : [
+            ...current,
+            {
+              ...p,
+              price: p.price + extra,
+              basePrice: p.price,
+              selections,
+              optionLabels,
+              lineKey,
+              quantity: 1,
+              notes,
+              available: true,
+            },
+          ],
     );
+  }
   return (
     <>
+      {customize && (
+        <ProductOptions
+          product={customize}
+          onClose={() => setCustomize(null)}
+          onAdd={(selections, notes) => add(customize, selections, notes)}
+        />
+      )}
+      {catalog.availability && !catalog.availability.open && (
+        <div className="business-notice" role="status">
+          <b>Pedidos pausados</b>
+          <span>{catalog.availability.reason}</span>
+          {catalog.availability.until && (
+            <span>
+              Hasta{" "}
+              {new Date(catalog.availability.until).toLocaleTimeString(
+                "es-MX",
+                {
+                  timeZone: catalog.settings?.timezone || "America/Mexico_City",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                },
+              )}
+            </span>
+          )}
+        </div>
+      )}
       <section className="hero">
         <div>
           <span className="eyebrow">EL ANTOJO TIENE NOMBRE</span>
@@ -102,7 +169,7 @@ export default function Shop({ catalog, run, tracking, setTracking }) {
                       alt={p.name}
                     />
                     {!p.active ? (
-                      <span>Agotado por ahora</span>
+                      <span>{p.unavailableReason || "Agotado por ahora"}</span>
                     ) : (
                       p.id === 1 && <span className="favorite">★ FAVORITA</span>
                     )}
@@ -115,7 +182,9 @@ export default function Shop({ catalog, run, tracking, setTracking }) {
                       <b>{money(p.price)}</b>
                       <button
                         disabled={!p.active}
-                        onClick={() => add(p)}
+                        onClick={() =>
+                          p.options?.length ? setCustomize(p) : add(p)
+                        }
                         aria-label={"Agregar " + p.name}
                       >
                         <Plus size={20} />

@@ -1,20 +1,83 @@
-import { DatabaseSync } from "node:sqlite";
-import { mkdirSync, readFileSync } from "node:fs";
+import { DatabaseSync, backup } from "node:sqlite";
+import {
+  mkdirSync,
+  readFileSync,
+  existsSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import { join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 mkdirSync("data", { recursive: true });
-const db = new DatabaseSync("data/orders.sqlite");
+mkdirSync("data/backups", { recursive: true });
+const existed = existsSync("data/orders.sqlite");
+export const db = new DatabaseSync("data/orders.sqlite");
+db.exec("PRAGMA busy_timeout=5000");
+export async function makeBackup(prefix = "manual") {
+  const name = `${prefix}-${new Date().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 6)}.sqlite`;
+  const temporary = join("data/backups", name + ".tmp");
+  try {
+    await backup(db, temporary);
+    const { renameSync } = await import("node:fs");
+    renameSync(temporary, join("data/backups", name));
+    return {
+      name,
+      createdAt: new Date().toISOString(),
+      size: statSync(join("data/backups", name)).size,
+    };
+  } catch (e) {
+    if (existsSync(temporary)) unlinkSync(temporary);
+    throw e;
+  }
+}
+if (existed) await makeBackup("pre-upgrade");
 db.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
-if (
-  !db
-    .prepare("PRAGMA table_info(orders)")
-    .all()
-    .some((c) => c.name === "zone_id")
-)
-  db.exec("ALTER TABLE orders ADD COLUMN zone_id INTEGER REFERENCES zones(id)");
+function addColumn(table, name, type) {
+  if (
+    !db
+      .prepare(`PRAGMA table_info(${table})`)
+      .all()
+      .some((c) => c.name === name)
+  )
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+}
+addColumn("orders", "zone_id", "INTEGER REFERENCES zones(id)");
+addColumn("products", "details_json", "TEXT NOT NULL DEFAULT '{}'");
+addColumn("orders", "details_json", "TEXT NOT NULL DEFAULT '{}'");
+addColumn("orders", "request_key", "TEXT");
+addColumn("order_items", "options_json", "TEXT NOT NULL DEFAULT '{}'");
+db.exec(
+  "CREATE UNIQUE INDEX IF NOT EXISTS orders_request_key ON orders(request_key)",
+);
+const parse = (s) => JSON.parse(s || "{}");
+export const getMeta = (key, fallback = null) => {
+  const row = db.prepare("SELECT payload FROM app_meta WHERE key=?").get(key);
+  return row ? parse(row.payload) : fallback;
+};
+export const setMeta = (key, value) =>
+  db
+    .prepare("INSERT OR REPLACE INTO app_meta VALUES(?,?)")
+    .run(key, JSON.stringify(value));
+export function recordAudit(actor, action, target, details = {}) {
+  db.prepare("INSERT INTO audit_log VALUES(?,?,?,?,?,?)").run(
+    randomUUID(),
+    new Date().toISOString(),
+    actor?.username || String(actor || "sistema"),
+    action,
+    target || null,
+    JSON.stringify(details),
+  );
+}
 export function load() {
   const products = db
     .prepare("SELECT * FROM products")
     .all()
-    .map((p) => ({ ...p, active: Boolean(p.active) }));
+    .map(({ details_json, active, ...p }) => ({
+      ...p,
+      ...parse(details_json),
+      active: Boolean(active),
+    }));
   if (!products.length) return null;
   const zones = db
     .prepare("SELECT * FROM zones")
@@ -24,6 +87,7 @@ export function load() {
     .prepare("SELECT * FROM orders ORDER BY created_at")
     .all()
     .map((o) => ({
+      ...parse(o.details_json),
       id: o.id,
       folio: o.folio,
       createdAt: o.created_at,
@@ -44,19 +108,26 @@ export function load() {
       checkoutUrl: o.checkout_url,
       paymentId: o.payment_id,
       paymentError: Boolean(o.payment_error),
+      requestId: o.request_key,
       lines: db
-        .prepare(
-          "SELECT product_id AS id,product_name AS name,unit_price AS price,quantity,notes FROM order_items WHERE order_id=? ORDER BY position",
-        )
-        .all(o.id),
+        .prepare("SELECT * FROM order_items WHERE order_id=? ORDER BY position")
+        .all(o.id)
+        .map((i) => ({
+          ...parse(i.options_json),
+          id: i.product_id,
+          name: i.product_name,
+          price: i.unit_price,
+          quantity: i.quantity,
+          notes: i.notes,
+        })),
     }));
-  return { products, zones, orders };
+  return { products, zones, orders, ...getMeta("operations", {}) };
 }
-export function save(state) {
+export function save(state, audit) {
   db.exec("BEGIN IMMEDIATE");
   try {
     const p = db.prepare(
-      "INSERT OR REPLACE INTO products VALUES(?,?,?,?,?,?,?)",
+      "INSERT INTO products(id,name,category,price,description,image,active,details_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,category=excluded.category,price=excluded.price,description=excluded.description,image=excluded.image,active=excluded.active,details_json=excluded.details_json",
     );
     for (const x of state.products)
       p.run(
@@ -67,16 +138,33 @@ export function save(state) {
         x.description,
         x.image,
         Number(x.active),
+        JSON.stringify({
+          options: x.options || [],
+          ingredientIds: x.ingredientIds || [],
+        }),
       );
-    const z = db.prepare("INSERT OR REPLACE INTO zones VALUES(?,?,?,?)");
+    const z = db.prepare(
+      "INSERT INTO zones VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,fee=excluded.fee,active=excluded.active",
+    );
     for (const x of state.zones) z.run(x.id, x.name, x.fee, Number(x.active));
     const o = db.prepare(
-      "INSERT INTO orders VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,payment_status=excluded.payment_status,preference_id=excluded.preference_id,checkout_url=excluded.checkout_url,payment_id=excluded.payment_id,payment_error=excluded.payment_error",
+      "INSERT INTO orders(id,folio,created_at,status,payment_status,customer_name,phone,address,zone_name,delivery,payment,subtotal,shipping,surcharge,total,preference_id,checkout_url,payment_id,payment_error,zone_id,details_json,request_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,payment_status=excluded.payment_status,preference_id=excluded.preference_id,checkout_url=excluded.checkout_url,payment_id=excluded.payment_id,payment_error=excluded.payment_error,details_json=excluded.details_json",
     );
     const line = db.prepare(
-      "INSERT OR IGNORE INTO order_items VALUES(?,?,?,?,?,?,?)",
+      "INSERT OR IGNORE INTO order_items(order_id,position,product_id,product_name,unit_price,quantity,notes,options_json) VALUES(?,?,?,?,?,?,?,?)",
     );
     for (const x of state.orders) {
+      const details = {
+        payloadHash: x.payloadHash,
+        rejectionReason: x.rejectionReason,
+        estimatedReadyAt: x.estimatedReadyAt,
+        acceptedAt: x.acceptedAt,
+        completedAt: x.completedAt,
+        rejectedAt: x.rejectedAt,
+        paidAt: x.paidAt,
+        refundRequired: x.refundRequired,
+        refundEvents: x.refundEvents,
+      };
       o.run(
         x.id,
         x.folio,
@@ -98,14 +186,71 @@ export function save(state) {
         x.paymentId || null,
         Number(x.paymentError || false),
         x.zoneId || null,
+        JSON.stringify(details),
+        x.requestId || null,
       );
       x.lines.forEach((i, n) =>
-        line.run(x.id, n, i.id, i.name, i.price, i.quantity, i.notes),
+        line.run(
+          x.id,
+          n,
+          i.id,
+          i.name,
+          i.price,
+          i.quantity,
+          i.notes,
+          JSON.stringify({
+            basePrice: i.basePrice,
+            selections: i.selections,
+            optionLabels: i.optionLabels,
+          }),
+        ),
       );
     }
+    setMeta("operations", {
+      settings: state.settings,
+      ingredients: state.ingredients,
+      closures: state.closures || [],
+    });
+    if (audit)
+      recordAudit(audit.actor, audit.action, audit.target, audit.details);
     db.exec("COMMIT");
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
   }
+}
+export function listBackups() {
+  return readdirSync("data/backups")
+    .filter((n) => /^(auto|manual|pre-upgrade)-[\w.-]+\.sqlite$/.test(n))
+    .map((name) => {
+      const stat = statSync(join("data/backups", name));
+      return { name, createdAt: stat.mtime.toISOString(), size: stat.size };
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+export function backupPath(name) {
+  if (!listBackups().some((b) => b.name === name)) return null;
+  return resolve("data/backups", name);
+}
+export function startBackups() {
+  const run = async () => {
+    try {
+      await makeBackup("auto");
+      const list = listBackups().filter((x) => x.name.startsWith("auto-"));
+      for (const item of list.slice(56))
+        unlinkSync(join("data/backups", item.name));
+      for (const item of listBackups()
+        .filter((x) => x.name.startsWith("pre-upgrade-"))
+        .slice(14))
+        unlinkSync(join("data/backups", item.name));
+    } catch (e) {
+      console.error(
+        "No se pudo completar el respaldo automático:",
+        e.code || "error de almacenamiento",
+      );
+    }
+  };
+  run();
+  const timer = setInterval(run, 6 * 60 * 60 * 1000);
+  timer.unref();
 }
