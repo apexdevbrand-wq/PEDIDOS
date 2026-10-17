@@ -18,7 +18,7 @@ function App() {
     [tracking, setTracking] = useState(null),
     [connected, setConnected] = useState(false),
     [key, setKey] = useState(""),
-    [username, setUsername] = useState("dueno"),
+    [username, setUsername] = useState(""),
     [user, setUser] = useState(null),
     [loginError, setLoginError] = useState(""),
     [busy, setBusy] = useState(false);

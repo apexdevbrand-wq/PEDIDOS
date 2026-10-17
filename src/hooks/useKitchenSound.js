@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState } from "react";
+// Dentro de la app Android (Capacitor) existe el plugin nativo KitchenAlarm,
+// que suena por el canal de alarma a volumen máximo. En el navegador se usa Web Audio.
+function nativeAlarm() {
+  const cap = window.Capacitor;
+  if (!cap?.isNativePlatform?.()) return null;
+  return cap.Plugins?.KitchenAlarm || cap.registerPlugin?.("KitchenAlarm") || null;
+}
 export default function useKitchenSound(orders) {
   const [enabled, setEnabled] = useState(false),
+    [ringing, setRinging] = useState(false),
     [message, setMessage] = useState(""),
     audio = useRef(null),
+    native = useRef(nativeAlarm()),
+    repeat = useRef(null),
     previous = useRef(null);
   function beep() {
     const ctx = audio.current;
@@ -26,6 +36,22 @@ export default function useKitchenSound(orders) {
       oscillator.stop(ctx.currentTime + offset + 0.2);
     }
   }
+  function ring() {
+    setRinging(true);
+    if (native.current) {
+      native.current.start().catch((e) => setMessage(e.message));
+      return;
+    }
+    beep();
+    clearInterval(repeat.current);
+    repeat.current = setInterval(beep, 3000);
+  }
+  function silence() {
+    setRinging(false);
+    clearInterval(repeat.current);
+    repeat.current = null;
+    native.current?.stop().catch(() => {});
+  }
   useEffect(() => {
     const ids = new Set(orders.map((o) => o.id));
     if (
@@ -33,11 +59,14 @@ export default function useKitchenSound(orders) {
       previous.current &&
       orders.some((o) => o.status === "pending" && !previous.current.has(o.id))
     )
-      beep();
+      ring();
+    else if (ringing && !orders.some((o) => o.status === "pending")) silence();
     previous.current = ids;
   }, [orders, enabled]);
   useEffect(
     () => () => {
+      silence();
+      native.current?.keepAwake({ enabled: false }).catch(() => {});
       audio.current?.close();
     },
     [],
@@ -45,9 +74,21 @@ export default function useKitchenSound(orders) {
   async function toggle() {
     try {
       if (enabled) {
+        silence();
+        await native.current?.keepAwake({ enabled: false });
         await audio.current?.close();
         audio.current = null;
         setEnabled(false);
+        return;
+      }
+      if (native.current) {
+        await native.current.keepAwake({ enabled: true });
+        await native.current.start();
+        setTimeout(() => native.current.stop().catch(() => {}), 1500);
+        setEnabled(true);
+        setMessage(
+          "Alarma activada a volumen máximo. Mantén la app abierta; la pantalla no se apagará.",
+        );
         return;
       }
       const Audio = window.AudioContext || window.webkitAudioContext;
@@ -61,5 +102,5 @@ export default function useKitchenSound(orders) {
       setMessage(e.message);
     }
   }
-  return { enabled, message, toggle };
+  return { enabled, ringing, message, toggle, silence };
 }

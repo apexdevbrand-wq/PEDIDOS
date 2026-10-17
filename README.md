@@ -70,7 +70,7 @@ Cada compra lleva una clave persistente por intento: doble clic, reintentos y re
 
 ### Cocina
 
-Tarjetas cronológicas con tiempo de espera y aviso visual de estimación vencida. Botón **Activar sonido** (requiere interacción y pestaña abierta). Al aceptar se indica el tiempo estimado; se puede actualizar. Rechazar exige motivo visible al cliente. Hay pausa rápida de 20 minutos, botón de comanda y ticket de 80 mm mediante el diálogo del navegador.
+Tarjetas cronológicas con tiempo de espera y aviso visual de estimación vencida. Botón **Activar sonido** (requiere interacción y pestaña abierta): con cada pedido nuevo suena y repite hasta pulsar **Silenciar alarma** o hasta que no queden pendientes. En la [app Android de Cocina](docs/ANDROID.md) suena por el canal de alarma a volumen máximo y mantiene la pantalla encendida. Al aceptar se indica el tiempo estimado; se puede actualizar. Rechazar exige motivo visible al cliente. Hay pausa rápida de 20 minutos, botón de comanda y ticket de 80 mm mediante el diálogo del navegador.
 
 **WhatsApp es manual y no integra una API de pago:** Cocina pulsa WhatsApp, revisa o edita el mensaje, pulsa Abrir WhatsApp y luego pulsa **Enviar dentro de WhatsApp**. La app no envía mensajes sola ni comprueba su entrega. Para teléfonos mexicanos de diez dígitos añade 52; el país es configurable. El dispositivo necesita WhatsApp instalado o WhatsApp Web con sesión.
 
@@ -117,10 +117,10 @@ La recuperación no borra pedidos. Cualquiera con acceso de escritura a la máqu
 
 Checkout Pro se habilita con `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET` y `PUBLIC_URL` HTTPS. El webhook `/api/payments/webhook` valida firma y consulta ID, referencia, moneda e importe en la API del proveedor. La vuelta del navegador no confirma pagos. Reembolsos/cupones se tramitan manualmente; sus cambios financieros se registran al recibir notificación verificada de MP. No se ejecutaron cobros ni reembolsos reales: faltan credenciales y cuenta sandbox.
 
-`npm start` sirve producción y exige HTTPS para sus cookies. [Publicación con Docker y Caddy](docs/DEPLOYMENT.md) deja preparada la configuración, pero no contrata ni publica alojamiento. La app deja de estar disponible si apagas su servidor. Ejecuta una única instancia por archivo SQLite; hay bloqueo para evitar procesos simultáneos.
+`npm start` sirve producción y exige HTTPS para sus cookies. La [guía de publicación](docs/DEPLOYMENT.md) explica paso a paso una VM gratuita en Oracle Cloud o Google Cloud con Docker y Caddy, y el respaldo automático fuera del servidor (`scripts/respaldo-externo.sh`). No contrata ni publica alojamiento por ti. La app deja de estar disponible si apagas su servidor. Ejecuta una única instancia por archivo SQLite; hay bloqueo para evitar procesos simultáneos.
 
 ## Validación y arquitectura
 
 `npm test` cubre importes, opciones, duplicados persistentes, permisos, sesiones, usuarios, auditoría, horarios, insumos, caja, firma de pagos, push y restauración. La prueba de arranque espera hasta 30 segundos y muestra el error real del proceso si falla. Se comprobó el recorrido de compra/cocina/admin en navegador y las tres vistas móviles sin desbordamiento.
 
-Consulta [arquitectura](docs/ARCHITECTURE.md), [despliegue](docs/DEPLOYMENT.md) y [recursos visuales](docs/ASSETS.md). Sustituye el menú y fotografías ilustrativas por tus recursos reales. La base sigue orientada a un negocio de una sola instancia: antes de operación pública define políticas de datos, monitoreo, límites de pedidos abusivos y operación/conciliación de pagos con el proveedor.
+Consulta [arquitectura](docs/ARCHITECTURE.md), [despliegue](docs/DEPLOYMENT.md), [app Android](docs/ANDROID.md) y [recursos visuales](docs/ASSETS.md). Sustituye el menú y fotografías ilustrativas por tus recursos reales. La base sigue orientada a un negocio de una sola instancia: antes de operación pública define políticas de datos, monitoreo, límites de pedidos abusivos y operación/conciliación de pagos con el proveedor.

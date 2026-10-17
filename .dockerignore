@@ -8,3 +8,6 @@ entregables
 
 .env.*
 !.env.example
+android-app
+.github
+respaldos-externos

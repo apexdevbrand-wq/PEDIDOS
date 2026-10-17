@@ -3,7 +3,7 @@
 ## Tres módulos y capas
 
 - `src/views/Shop.jsx`: catálogo, variantes de carrito y configuración de productos; `Cart.jsx` crea compras con clave persistente; `Tracking.jsx` muestra seguimiento, rechazo, estimación, push y comprobante.
-- `src/views/Kitchen.jsx`: flujo cronológico, sonido, tiempos, rechazo, WhatsApp manual y tickets. `useKitchenSound.js` crea un único contexto de audio por activación y lo cierra al salir.
+- `src/views/Kitchen.jsx`: flujo cronológico, sonido, tiempos, rechazo, WhatsApp manual y tickets. `useKitchenSound.js` repite el aviso hasta silenciarlo; dentro de la app Android usa el plugin nativo `KitchenAlarm` (canal de alarma), y en el navegador un único contexto de audio por activación que cierra al salir.
 - `src/views/Admin.jsx`: secciones internas de caja, menú/colonias, negocio/insumos, equipo/auditoría y respaldos. No son módulos públicos adicionales.
 - `server/domain.js`: cálculo en centavos y transiciones; la UI comparte esa función pura para actualizar el carrito, pero el servidor recalcula independientemente.
 - `server/operations.js`: disponibilidad efectiva, horarios nocturnos, configuración, opciones, fingerprint de compra y reportes.
@@ -65,3 +65,7 @@ No sesión → 401; rol sin permiso → 403. Mutaciones privadas verifican Origi
 Las pruebas usan servidores y bases temporales, puertos libres y diagnóstico de arranque con espera de 30 segundos. Cubren la API real, reintentos tras reinicio, roles, usuarios, caja, backups/restauración, importes, horarios y el service worker de push. El navegador verifica compra personalizada, recepción/cocina, impresión, rechazo visible, WhatsApp sin enviar, insumos, pausa, cuentas, cierre y responsividad.
 
 Persistencia pensada para una instancia y volumen bajo: el estado operativo se carga en memoria y cada mutación se persiste transaccionalmente. Para múltiples instancias o un historial grande habrá que migrar a consultas/paginación por entidad y eventos compartidos. Las sesiones no sobreviven al reinicio. Requieren validación externa: cobro/reembolso MP con credenciales, entrega push en teléfonos reales, impresión física y DNS/HTTPS del despliegue.
+
+## App Android
+
+`android-app/` es un proyecto Capacitor independiente del servidor: carga `PUBLIC_URL/personal` en un WebView y registra el plugin `KitchenAlarm`. No incluye código del frontend; cada cambio web se refleja al recargar la app. Detalles en [ANDROID.md](ANDROID.md).

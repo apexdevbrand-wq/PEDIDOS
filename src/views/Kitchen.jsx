@@ -95,6 +95,11 @@ export default function Kitchen({
         >
           {sound.enabled ? "🔊 Desactivar sonido" : "🔈 Activar sonido"}
         </button>
+        {sound.ringing && (
+          <button className="primary" onClick={sound.silence}>
+            🔕 Silenciar alarma
+          </button>
+        )}
         <button
           className="secondary"
           onClick={() =>
