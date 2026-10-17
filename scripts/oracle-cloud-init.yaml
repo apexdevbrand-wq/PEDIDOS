@@ -1,5 +1,5 @@
 #cloud-config
-# Instala Los Santos al crear la VM de Oracle (Ubuntu 24.04, Ampere A1).
+# Instala Los Santos al crear la VM de Oracle (Ubuntu 24.04; Ampere A1 o E2.1.Micro).
 # Pégalo en: Crear instancia → Mostrar opciones avanzadas → Gestión →
 # "Pegar script de cloud-init". Antes, reemplaza los valores __ENTRE_GUIONES__.
 # El servidor queda listo en ~10 minutos después de encenderse.
@@ -22,10 +22,11 @@ write_files:
       VAPID_SUBJECT=mailto:__CORREO__
       TRUST_PROXY=1
 runcmd:
+  # Memoria extra (swap): necesaria en la VM gratuita de 1 GB (E2.1.Micro).
+  - [sh, -c, "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab"]
   - [sh, -c, "curl -fsSL https://get.docker.com | sh"]
   # Las imágenes de Ubuntu de Oracle bloquean 80/443 en el firewall interno.
   - [sh, -c, "iptables -I INPUT 6 -p tcp --dport 80 -m state --state NEW -j ACCEPT && iptables -I INPUT 6 -p tcp --dport 443 -m state --state NEW -j ACCEPT && netfilter-persistent save"]
-  - [sh, -c, "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab"]
   - [sh, -c, "git clone --depth 1 -b lanzamiento-web https://github.com/apexdevbrand-wq/pedidos.git /opt/los-santos"]
   - [sh, -c, "cp /root/los-santos.env /opt/los-santos/.env && chmod 600 /opt/los-santos/.env"]
   - [sh, -c, "cd /opt/los-santos && docker compose up -d --build"]
