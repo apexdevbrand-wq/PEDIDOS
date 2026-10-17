@@ -10,10 +10,6 @@ packages:
   - curl
   - iptables-persistent
 write_files:
-  - path: /root/.ssh/los_santos_deploy
-    permissions: "0600"
-    content: |
-      __LLAVE_PRIVADA_DE_SOLO_LECTURA__
   - path: /root/los-santos.env
     permissions: "0600"
     content: |
@@ -30,7 +26,7 @@ runcmd:
   # Las imágenes de Ubuntu de Oracle bloquean 80/443 en el firewall interno.
   - [sh, -c, "iptables -I INPUT 6 -p tcp --dport 80 -m state --state NEW -j ACCEPT && iptables -I INPUT 6 -p tcp --dport 443 -m state --state NEW -j ACCEPT && netfilter-persistent save"]
   - [sh, -c, "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab"]
-  - [sh, -c, "GIT_SSH_COMMAND='ssh -i /root/.ssh/los_santos_deploy -o StrictHostKeyChecking=accept-new' git clone --depth 1 -b lanzamiento-web git@github.com:apexdevbrand-wq/pedidos.git /opt/los-santos"]
+  - [sh, -c, "git clone --depth 1 -b lanzamiento-web https://github.com/apexdevbrand-wq/pedidos.git /opt/los-santos"]
   - [sh, -c, "cp /root/los-santos.env /opt/los-santos/.env && chmod 600 /opt/los-santos/.env"]
   - [sh, -c, "cd /opt/los-santos && docker compose up -d --build"]
-  # Actualizar después: cd /opt/los-santos && sudo GIT_SSH_COMMAND='ssh -i /root/.ssh/los_santos_deploy' git pull && sudo docker compose up -d --build
+  # Actualizar la app después: cd /opt/los-santos && sudo git pull && sudo docker compose up -d --build

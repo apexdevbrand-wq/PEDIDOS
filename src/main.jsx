@@ -28,6 +28,22 @@ function App() {
     [loginError, setLoginError] = useState(""),
     [busy, setBusy] = useState(false);
   const epoch = useRef(0);
+  // Android/Chrome: botón para instalar la tienda como app en el teléfono.
+  const [install, setInstall] = useState(null);
+  useEffect(() => {
+    const onPrompt = (e) => {
+      e.preventDefault();
+      setInstall(e);
+    };
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", () => setInstall(null));
+    return () => window.removeEventListener("beforeinstallprompt", onPrompt);
+  }, []);
+  async function promptInstall() {
+    install?.prompt();
+    await install?.userChoice.catch(() => {});
+    setInstall(null);
+  }
   const staff = role === "staff" || role === "owner";
   const safeView =
     role === "customer"
@@ -227,16 +243,24 @@ function App() {
             <button onClick={logout}>Cerrar sesión</button>
           </div>
         ) : (
-          !personal &&
-          catalog.settings?.instagram && (
-            <a
-              className="topbar-social"
-              href={"https://instagram.com/" + catalog.settings.instagram}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              @{catalog.settings.instagram}
-            </a>
+          !personal && (
+            <div className="topbar-end">
+              {install && (
+                <button className="install-app" onClick={promptInstall}>
+                  Instalar app
+                </button>
+              )}
+              {catalog.settings?.instagram && (
+                <a
+                  className="topbar-social"
+                  href={"https://instagram.com/" + catalog.settings.instagram}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  @{catalog.settings.instagram}
+                </a>
+              )}
+            </div>
           )
         )}
       </header>
@@ -316,7 +340,10 @@ function App() {
               <Mascot kind="devil" pose="fiesta" tone="#fff" fill="#e10a0a" />
               <Mascot kind="angel" pose="fiesta" fill="#e10a0a" />
             </div>
-            <small>Precios en pesos mexicanos. Las fotos son ilustrativas.</small>
+            <small>
+              Precios en pesos mexicanos. Las fotos son ilustrativas. En iPhone: Compartir →
+              “Agregar a inicio” para tenerla como app.
+            </small>
           </div>
         </footer>
       )}

@@ -197,15 +197,25 @@ export default function Shop({ catalog, run, tracking, setTracking }) {
             )}
           </ul>
         </div>
-        <div className="hero-board" aria-label="Miche, hamburguesa, elote espolvoreado y esquites">
+        <div className="hero-board">
           <span className="ribbon hero-ribbon">Drinks, snacks &amp; más</span>
-          <span className="hero-sun" aria-hidden="true" />
-          <img className="hero-item hero-miche" src="/images/products/miche.png" alt="" />
-          <img className="hero-item hero-burger" src="/images/products/hamburguesa-tocino-pina.png" alt="Hamburguesa hawaiana" width="720" height="552" />
-          <img className="hero-item hero-elote" src="/images/products/elote-espolvoreado.png" alt="" />
-          <img className="hero-item hero-esquite" src="/images/products/esquites-vaso-logo.png" alt="" />
-          <Mascot kind="angel" pose="hola" className="hero-angel" />
-          <Mascot kind="devil" pose="guino" tone="#fff" fill="#e10a0a" className="hero-devil" />
+          <picture>
+            <source
+              type="image/webp"
+              srcSet="/images/hero-santos-800.webp 800w, /images/hero-santos.webp 1536w"
+              sizes="(max-width: 1000px) 100vw, 50vw"
+            />
+            <img
+              className="hero-photo"
+              src="/images/hero-santos.jpg"
+              srcSet="/images/hero-santos-800.jpg 800w, /images/hero-santos.jpg 1536w"
+              sizes="(max-width: 1000px) 100vw, 50vw"
+              width="1536"
+              height="1024"
+              fetchPriority="high"
+              alt="El diablito y el ángel de Los Santos se asoman tras una hamburguesa con tocino y piña, café frío, esquites y elote"
+            />
+          </picture>
           {Number.isFinite(combosFrom) && (
             <a className="burst hero-burst" href={"#" + slugify("Combos")}>
               <small>Combos desde</small>

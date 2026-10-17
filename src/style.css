@@ -3133,3 +3133,57 @@ body {
   right: 6px;
   width: 60px;
 }
+
+/* Portada con la imagen oficial (ángel y diablito con los productos) */
+.hero-board {
+  min-height: 0;
+  background: #1a0606;
+  padding: 0;
+  overflow: visible;
+}
+.hero-board picture,
+.hero-photo {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  border-radius: 36px;
+}
+.hero-board .hero-burst {
+  top: auto;
+  bottom: -22px;
+  left: auto;
+  right: -14px;
+  --size: clamp(104px, 11vw, 140px);
+}
+@media (max-width: 760px) {
+  .hero-board picture,
+  .hero-photo {
+    border-radius: 24px;
+  }
+  .hero-board .hero-burst {
+    right: -6px;
+    bottom: -26px;
+  }
+}
+
+.topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.install-app {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--halo);
+  color: var(--carbon);
+  font-weight: 700;
+  font-size: 14px;
+}
+@media (max-width: 420px) {
+  .topbar-end .topbar-social {
+    display: none;
+  }
+}
