@@ -44,7 +44,11 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 1. Entra a duckdns.org con tu cuenta de Google/GitHub y crea, por ejemplo, `lossantos` → `lossantos.duckdns.org`.
 2. Escribe la IP pública de la VM y guarda.
 
-## 3. Instalar la app en la VM
+### Atajo: VM que se instala sola (cloud-init)
+
+En **Crear instancia → Mostrar opciones avanzadas → Gestión** pega el contenido de `scripts/oracle-cloud-init.yaml` con sus valores reemplazados (dominio, contraseñas iniciales, correo y la llave de solo lectura del repositorio). Al encender, la VM instala Docker, abre los puertos, descarga la rama `lanzamiento-web` y arranca la app con HTTPS. Tarda unos 10 minutos. Después solo falta apuntar DuckDNS a la IP pública.
+
+## 3. Instalar la app en la VM (manual)
 
 ```bash
 ssh -i llave.key ubuntu@IP_DE_LA_VM

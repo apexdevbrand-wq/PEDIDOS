@@ -10,3 +10,9 @@
 - Tipografías incluidas en el paquete (sin peticiones externas): Anton (títulos y precios) y Rubik (texto), ambas con licencia SIL Open Font License.
 
 Las fotos que se suben desde el panel se guardan en `data/uploads/` con nombre aleatorio, se sirven desde `/uploads/` y se copian a los respaldos externos si están configurados.
+
+## Versión 0.5
+
+- `src/components/Mascot.jsx`: ángel y diablito redibujados en SVG a partir de los personajes de la marca, con poses `hola`, `guino`, `antojo`, `duerme` y `fiesta`. Cambian de color con `tone` y `fill` y se animan solo si el dispositivo no pide reducir movimiento.
+- `public/images/products/miche.png`, `mojito-limon.png`, `kittychela.png`, `elote-espolvoreado.png`: recortes sin fondo tomados de la carta impresa. `public/images/aguachile.jpg` y `vaso-botanero.jpg` son fragmentos de la misma carta. Su resolución es baja (vienen de una imagen de 1280 px): sirven para miniaturas; sustitúyelas por fotos propias cuando las tengas.
+- Tipografía adicional: DM Serif Display (cursiva para “antoja” y los listones), licencia SIL Open Font License.

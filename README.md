@@ -2,6 +2,15 @@
 
 Aplicación de pedidos de **Los Santos · Drinks, snacks & más** (Minatitlán, Ver.) con tres módulos: cliente, cocina y administración. React, Tailwind, Express y SQLite de Node.js 24. Español, precios MXN y zona horaria configurable.
 
+## Novedades de la versión 0.5 (lanzamiento web)
+
+- **Carta completa** de “¿Qué se te antoja hoy?”: 46 productos activos en Combos, Hamburguesas (pecados capitales), Alitas y boneless (10/15/20 piezas, 300 g/500 g/1 kg y 8 salsas), Diablitros (miches), Drinks, La Elotiza (esquites, elotes con sabrita, charolas) y Mariscos (aguachile con promoción de 2 micheladas por $150). Dos combos que en la carta aparecen atenuados quedan **archivados**: se reactivan en Catálogo → Archivados.
+- **Rediseño estilo carta impresa**: fondo papel, tableros rojos con listón amarillo, título “¿Qué se te antoja hoy?”, sección “Los consentidos” y menú en lista para pedir rápido desde el teléfono.
+- **Ángel y diablito redibujados en vector** con poses (saluda, guiña, antojo, duerme, fiesta) y movimiento leve: aparecen en la portada, en las secciones, en el carrito, en el seguimiento, en la alarma de Cocina y cuando los pedidos están en pausa.
+- **Pago por transferencia**: el dueño captura banco, titular y CLABE en Administración → Negocio; el cliente ve los datos con botones para copiar y un botón que abre WhatsApp (921 489 9319 por defecto) con el folio y el monto. Cocina pulsa “Transferencia recibida” antes de preparar. Aparece en caja, CSV y ticket.
+- **Mercado Pago** se muestra como “Muy pronto” y queda desactivado hasta configurar sus credenciales.
+- Frase editable por categoría (el listón amarillo) y `scripts/oracle-cloud-init.yaml` para crear el servidor de Oracle ya instalado.
+
 ## Novedades de la versión 0.4 (versión unificada)
 
 Reúne lo mejor de tres líneas de trabajo: la v0.3 (catálogo administrable, rediseño, Mercado Pago probado, respaldos a R2/B2, rendimiento), la **v2** que compartiste (fotos recortadas reales, logotipo y personajes en alta calidad, alarma de cocina con sonido) y la rama `entrega-los-santos` de **GitHub** (app Android de Cocina con alarma nativa, compilación en GitHub Actions, guía de Google Cloud y respaldo con rclone).

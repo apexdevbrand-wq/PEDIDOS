@@ -97,7 +97,7 @@ export default function Mascot({ kind = "angel", pose = "hola", className = "", 
   return (
     <svg
       viewBox="0 0 200 250"
-      className={`mascot-svg mascot-${kind} pose-${pose} ${className}`}
+      className={`mascot-svg m-${kind} pose-${pose} ${className}`}
       role={title ? "img" : "presentation"}
       aria-label={title}
       aria-hidden={title ? undefined : "true"}

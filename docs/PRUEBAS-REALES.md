@@ -66,7 +66,13 @@ En el local, con el servidor publicado:
 - [ ] Cocina: con la alarma activada, un pedido nuevo suena en bucle; “Silenciar” lo calla y vuelve a sonar a los 90 s si nadie lo acepta.
 - [ ] App Android (si la usas): sigue [ANDROID.md](ANDROID.md) → “Instalar en la tablet de cocina”.
 
-## 6. Antes de abrir al público
+## 6. Pago por transferencia
+
+- [ ] Captura banco, titular y CLABE en Administración → Negocio y verifica en el teléfono que el cliente los ve y puede copiarlos.
+- [ ] El botón “Enviar comprobante por WhatsApp” abre el chat de 921 489 9319 con folio y monto.
+- [ ] En Cocina, “Transferencia recibida” solo después de ver el depósito en el banco (no solo la captura de pantalla).
+
+## 7. Antes de abrir al público
 
 - [ ] Cambia los precios y fotos de ejemplo desde **Administración → Catálogo** (los precios de Promos son los publicados en Facebook; el resto son de ejemplo).
 - [ ] Revisa colonias y costos de envío en **Envíos**.
