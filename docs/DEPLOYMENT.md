@@ -1,48 +1,35 @@
-# Servidor público y HTTPS
+# Publicar Los Santos en internet (costo cero)
 
-Para que clientes externos compren, la cocina reciba pedidos en otro dispositivo y funcionen push y Mercado Pago, la app necesita una máquina encendida con almacenamiento persistente y una dirección pública **HTTPS**. Esta guía usa una máquina virtual gratuita en **Oracle Cloud** o **Google Cloud** con Docker + Caddy. Caddy obtiene y renueva solo el certificado HTTPS.
+## Qué conviene y por qué
 
-**Qué se probó:** `docker compose up -d --build` con Caddy en `localhost`: redirección HTTP→HTTPS, inicio de sesión con cookie `Secure`, eventos en tiempo real de Cocina a través del proxy y `scripts/respaldo-externo.sh` copiando a un destino rclone con verificación de integridad. **No se probó:** crear la VM en Oracle o Google, DNS real ni certificado de Let's Encrypt. Los niveles gratuitos los definen los proveedores y pueden cambiar; revisa sus condiciones al registrarte.
+La app es **un solo proceso Node.js con SQLite en disco**, avisos en tiempo real (SSE) y fotos en `data/uploads`. Necesita un servidor encendido todo el día con disco que no se borre. Eso descarta varias opciones “gratis” populares:
 
-## 1. Elegir proveedor
+| Opción | ¿Sirve tal cual? | Motivo |
+| --- | --- | --- |
+| **Oracle Cloud Always Free (VM Ampere A1)** | **Sí — recomendada** | VM propia, 200 GB de disco persistente, 10 TB/mes de salida. Corre `compose.yaml` sin cambios. |
+| Google Cloud e2-micro (Always Free) | Sí, con límites | 1 GB de RAM (requiere swap) y solo 1 GB/mes de salida hacia México; las fotos del menú pueden pasarlo y se cobra. Regiones gratuitas solo en EE. UU. |
+| Equipo del negocio + Cloudflare Tunnel | Sí | Gratis, pero depende de la luz/internet del local y requiere un dominio en Cloudflare (~US$10/año). |
+| Render / Railway / Koyeb gratis | No | Se duermen o pierden el disco al reiniciar: se borrarían pedidos. |
+| Cloudflare Workers + D1 / Supabase | No sin reescribir | Habría que rehacer la capa de datos y el tiempo real; Supabase pausa proyectos gratuitos inactivos. |
 
-|                     | Oracle Cloud Always Free (recomendado)                                                                    | Google Cloud e2-micro                                                                 |
-| ------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Región              | Hay regiones en México (Querétaro, Monterrey)                                                             | Solo `us-west1`, `us-central1` o `us-east1` entran en el nivel gratuito               |
-| Máquina             | Ampere ARM, hasta 4 CPU y 24 GB RAM en total                                                              | 2 vCPU compartidas, 1 GB RAM (necesita swap para compilar)                            |
-| Tráfico de salida   | 10 TB al mes                                                                                              | 1 GB al mes; lo que exceda se cobra (las fotos del menú consumen la mayor parte)      |
-| Riesgos             | El registro a veces se rechaza o no hay capacidad ARM; Oracle puede recuperar instancias gratuitas inactivas. Pasar la cuenta a Pago por uso (sin salir de los límites gratuitos) evita esa recuperación | Pide tarjeta; si cambias de tipo de máquina, región o disco, empieza a cobrar         |
+**Arquitectura recomendada ($0):** Oracle Always Free → Docker Compose (app + Caddy con HTTPS automático) → subdominio gratuito de DuckDNS → respaldos automáticos a Cloudflare R2 o Backblaze B2 (10 GB gratis).
 
-Las dos piden tarjeta para verificar identidad. Configura una alerta de presupuesto en cualquiera de ellas.
+Un dominio propio (`lossantospedidos.com` o similar) es opcional y cuesta alrededor de US$10/año; se puede añadir después sin tocar la app.
 
-## 2. Crear la máquina virtual
+> Límites vigentes al revisar esta guía (octubre 2026): Oracle redujo en junio de 2026 el Always Free de Ampere A1 a **2 OCPU y 12 GB de RAM** en total. La app necesita mucho menos. Oracle puede recuperar instancias Always Free “inactivas” si durante 7 días el CPU (p95), la red **y la memoria** están por debajo del 20 %. Crea la VM con **1 OCPU y 2 GB** para que el uso de memoria quede por encima de ese umbral, y revisa la [documentación de Oracle](https://docs.oracle.com/en-us/iaas/Content/FreeTier/resourceref.htm) por si cambia.
 
-Necesitas una llave SSH. En Windows, macOS o Linux abre una terminal y ejecuta `ssh-keygen -t ed25519` (acepta la ruta por defecto). La llave pública queda en `~/.ssh/id_ed25519.pub`.
+## 1. Crear la VM en Oracle Cloud
 
-### Oracle Cloud
+1. Crea una cuenta en cloud.oracle.com (pide tarjeta para verificar identidad; no cobra dentro de Always Free). Elige como región de origen la más cercana (p. ej. Querétaro o Monterrey).
+2. **Compute → Instances → Create**: imagen **Ubuntu 24.04**, forma **VM.Standard.A1.Flex** con **1 OCPU / 2 GB**. Descarga la llave SSH.
+3. **Networking → Virtual Cloud Network → Security List**: agrega reglas de entrada TCP **80** y **443** desde `0.0.0.0/0`.
+4. Copia la IP pública de la VM.
 
-1. En la consola: **Compute → Instances → Create instance**.
-2. Imagen: **Canonical Ubuntu 24.04**. Forma: **VM.Standard.A1.Flex** (Ampere), 1 OCPU y 6 GB bastan. Si aparece "Out of capacity", prueba otro dominio de disponibilidad o más tarde.
-3. En **Add SSH keys** pega el contenido de `id_ed25519.pub`. Deja la IP pública asignada.
-4. Al crearla, entra en la subred → **Security List** → **Add Ingress Rules**: origen `0.0.0.0/0`, TCP, puertos `80` y `443` (dos reglas o `80,443`).
-5. Conéctate: `ssh ubuntu@IP_PUBLICA`. Las imágenes Ubuntu de Oracle traen un firewall interno; ábrelo:
+### Alternativa: Google Cloud e2-micro
 
-```bash
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
-sudo netfilter-persistent save
-```
-
-6. Para que la IP no cambie: **Networking → Reserved Public IPs** y asígnala a la instancia (gratis mientras esté en uso).
-
-### Google Cloud
-
-1. **Compute Engine → VM instances → Create instance**.
-2. Región `us-central1` (u otra de las tres gratuitas), tipo **e2-micro**, disco de arranque **Ubuntu 24.04 LTS**, **disco persistente estándar** de 30 GB como máximo.
-3. En **Firewall** marca **Allow HTTP traffic** y **Allow HTTPS traffic**.
-4. En **VPC network → IP addresses** reserva la IP externa como **estática**. (Una IP estática sin usar sí se cobra).
-5. Conéctate con el botón **SSH** de la consola o `gcloud compute ssh NOMBRE_VM`.
-6. Agrega 2 GB de swap; sin esto la compilación puede quedarse sin memoria:
+1. **Compute Engine → VM instances → Create instance**: región `us-central1` (u otra de las tres gratuitas), tipo **e2-micro**, disco **Ubuntu 24.04 LTS** estándar de 30 GB como máximo.
+2. Marca **Allow HTTP traffic** y **Allow HTTPS traffic**. En **VPC network → IP addresses** reserva la IP externa como **estática** (sin usar sí se cobra).
+3. Conéctate por SSH y agrega 2 GB de swap antes de compilar:
 
 ```bash
 sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
@@ -50,101 +37,115 @@ sudo mkswap /swapfile && sudo swapon /swapfile
 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-## 3. Dominio
+4. Sigue desde el paso 3 de esta guía (`scripts/oracle-setup.sh` también sirve en Google Cloud; ahí el firewall interno ya está abierto). Configura una alerta de presupuesto de US$1.
 
-Crea un registro DNS **A** que apunte a la IP pública de la VM, por ejemplo `pedidos.tudominio.com`. Si no tienes dominio, un subdominio gratuito como `tunegocio.duckdns.org` sirve. Comprueba con `ping pedidos.tudominio.com` que responde la IP correcta antes de seguir: Caddy necesita que el DNS ya apunte al servidor para emitir el certificado.
+## 2. Subdominio gratuito (DuckDNS)
 
-## 4. Instalar Docker y la app (en la VM)
+1. Entra a duckdns.org con tu cuenta de Google/GitHub y crea, por ejemplo, `lossantos` → `lossantos.duckdns.org`.
+2. Escribe la IP pública de la VM y guarda.
 
-```bash
-sudo apt update && sudo apt -y upgrade
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER
-exit   # vuelve a conectarte por SSH para que aplique el grupo
-```
-
-Sube el proyecto. Desde la VM, con el repositorio privado:
+## 3. Instalar la app en la VM
 
 ```bash
-git clone https://github.com/apexdevbrand-wq/PEDIDOS.git lossantos
-cd lossantos
-git checkout entrega-los-santos
-```
-
-GitHub pedirá tu usuario y un token personal en lugar de la contraseña. Alternativa: sube el ZIP con `scp Los-Santos-proyecto.zip ubuntu@IP:` y descomprímelo con `unzip`.
-
-Crea `.env`:
-
-```bash
-cp .env.example .env
+ssh -i llave.key ubuntu@IP_DE_LA_VM
+git clone <tu repositorio> los-santos   # o sube el ZIP con scp y descomprímelo
+cd los-santos
+bash scripts/oracle-setup.sh            # instala Docker, abre 80/443 y crea .env
 nano .env
 ```
 
-Rellena al menos:
+En `.env` define como mínimo:
 
-```ini
+```
 OWNER_USERNAME=dueno
-OWNER_PASSWORD=una-contraseña-larga-de-12-o-más
-DOMAIN=pedidos.tudominio.com
-PUBLIC_URL=https://pedidos.tudominio.com
-VAPID_SUBJECT=mailto:contacto@tunegocio.com
+OWNER_PASSWORD=una-contraseña-larga-de-12+
+DOMAIN=lossantos.duckdns.org
+PUBLIC_URL=https://lossantos.duckdns.org
+VAPID_SUBJECT=mailto:correo-real-del-negocio@gmail.com
 ```
 
-Protege el archivo y arranca:
+Luego:
 
 ```bash
-chmod 600 .env
-docker compose up -d --build
-docker compose logs -f   # espera "Los Santos listo"; Ctrl+C para salir del registro
+sudo docker compose up -d --build
+curl https://lossantos.duckdns.org/api/health
 ```
 
-Abre `https://pedidos.tudominio.com` y luego `/personal`. Ya con sesión, en Administración → Equipo crea las cuentas reales, y después borra `OWNER_PASSWORD` de `.env` (las contraseñas existentes no cambian al editar `.env`).
+Caddy obtiene el certificado HTTPS solo. Después de entrar por primera vez a `/personal`, **borra `OWNER_PASSWORD` del `.env`** (las cuentas ya quedaron guardadas en la base).
 
-## 5. Comprobar antes de abrir al público
+## 4. Respaldos fuera del servidor
 
-1. Catálogo y compra en efectivo desde un teléfono con datos móviles (no desde el wifi del local).
-2. Cocina recibe el pedido en tiempo real y suena.
-3. Aceptar, rechazar y entregar; el cliente ve los cambios.
-4. Activar **Avisos del pedido** en el teléfono del cliente y confirmar que llega el push.
-5. Solo después configura Mercado Pago (`MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`) y prueba en sandbox. Tras editar `.env`: `docker compose up -d`.
+La app ya hace respaldos cada 6 h en el disco. Para que además se copien solos a otro lugar:
 
-## 6. Respaldo fuera del servidor
+### Opción A: Cloudflare R2 (10 GB gratis, sin cobro por descarga)
 
-La app ya guarda respaldos cada seis horas, pero dentro del mismo disco. Si se pierde la VM, se pierden también. `scripts/respaldo-externo.sh` copia el más reciente a `respaldos-externos/` y, con rclone, a otro servicio (Google Drive, OneDrive, Dropbox, otro bucket).
+1. dash.cloudflare.com → **R2** → crea el bucket `los-santos-respaldos` (puede pedir método de pago para activar R2; dentro de 10 GB no cobra).
+2. **R2 → Manage API tokens → Create API token** con permiso *Object Read & Write* solo para ese bucket. Copia *Access Key ID*, *Secret Access Key* y el endpoint `https://<ID>.r2.cloudflarestorage.com`.
+3. En el bucket → **Settings → Object lifecycle rules**: borrar objetos con prefijo `los-santos/backups/` después de 60 días. **No** pongas regla al prefijo `los-santos/uploads/` (son las fotos).
 
-1. Instala rclone en la VM: `sudo apt install -y rclone`.
-2. Configura el destino con `rclone config` → `n` (nuevo) → nombre `drive` → tipo `drive` (Google Drive). Deja client id/secret vacíos y alcance `drive.file`. Cuando pregunte por navegador automático responde `n`: te da un comando `rclone authorize "drive" ...` que ejecutas en tu computadora con rclone instalado; inicia sesión y pega en la VM el código resultante.
-3. Prueba:
+### Opción B: Backblaze B2 (10 GB gratis, sin tarjeta)
 
-```bash
-RCLONE_DESTINO=drive:LosSantos/respaldos sh scripts/respaldo-externo.sh
-```
+Crea un bucket privado y una *Application Key* limitada a él. El endpoint es `https://s3.<región>.backblazeb2.com` y la región es la del endpoint (p. ej. `us-west-004`).
 
-4. Prográmalo cada seis horas con `crontab -e` y añade (cambia la ruta por la tuya):
+### Opción C: Google Drive con rclone (15 GB gratis, sin tarjeta)
+
+`scripts/respaldo-externo.sh` copia el último respaldo y las fotos fuera del contenedor y, con rclone, a Google Drive (u OneDrive, Dropbox, etc.):
+
+1. `sudo apt install -y rclone` y `rclone config` → nuevo → nombre `drive` → tipo `drive`, alcance `drive.file`. Cuando pregunte por navegador responde `n` y ejecuta en tu computadora el comando `rclone authorize ...` que te indica.
+2. Prueba: `RCLONE_DESTINO=drive:LosSantos/respaldos sh scripts/respaldo-externo.sh`
+3. Prográmalo cada 6 horas con `crontab -e`:
 
 ```cron
-20 */6 * * * cd /home/ubuntu/lossantos && RCLONE_DESTINO=drive:LosSantos/respaldos sh scripts/respaldo-externo.sh >> respaldos-externos/registro.log 2>&1
+20 */6 * * * cd /home/ubuntu/los-santos && RCLONE_DESTINO=drive:LosSantos/respaldos sh scripts/respaldo-externo.sh >> respaldos-externos/registro.log 2>&1
 ```
 
-Se conservan 14 días en el servidor y 60 en el destino (variables `DIAS_LOCALES` y `DIAS_REMOTOS`). Los respaldos contienen datos de clientes y hashes de contraseñas: el destino debe ser una cuenta privada del negocio. Revisa de vez en cuando que aparezcan archivos nuevos, y practica una restauración (`node scripts/restore-backup.js`, ver README) al menos una vez.
+Se conservan 14 días en el servidor y 60 en Drive (`DIAS_LOCALES`, `DIAS_REMOTOS`). Puedes usar esta opción además de R2/B2.
 
-## Actualizar de forma segura
+### Configurar R2 o B2 en la app
+
+```
+BACKUP_S3_ENDPOINT=https://<ID>.r2.cloudflarestorage.com
+BACKUP_S3_BUCKET=los-santos-respaldos
+BACKUP_S3_ACCESS_KEY_ID=...
+BACKUP_S3_SECRET_ACCESS_KEY=...
+BACKUP_S3_REGION=auto
+```
+
+`sudo docker compose up -d` y en **Administración → Respaldos** pulsa **Respaldar y enviar ahora**. Debe aparecer “Última copia correcta”. Desde entonces, cada respaldo automático y cada foto nueva se copian solos; las fotos se envían una sola vez.
+
+### Restaurar en otra máquina
+
+1. Descarga del bucket el `.sqlite` más reciente de `backups/` y la carpeta `uploads/`.
+2. Con la app detenida: `node scripts/restore-backup.js ruta/al/respaldo.sqlite` y copia las fotos a `data/uploads/`.
+   Con Docker: copia ambos al volumen (`docker compose cp`) y ejecuta el script dentro del contenedor con la app detenida.
+
+## 5. App Android de Cocina (opcional)
+
+Con el sitio ya publicado en HTTPS puedes generar gratis un APK que abre `/personal` y hace sonar los pedidos nuevos por el canal de **alarma** de Android a volumen máximo. Pasos en [ANDROID.md](ANDROID.md).
+
+## 6. Monitoreo gratuito
+
+Crea un monitor HTTP en uptimerobot.com (gratis) hacia `https://lossantos.duckdns.org/api/health` cada 5 minutos con aviso por correo o Telegram. Así sabrás si el servidor se cae antes que tus clientes. Las peticiones del monitor también cuentan como actividad para la VM.
+
+## 7. Alternativa: equipo del negocio + Cloudflare Tunnel
+
+Útil si prefieres no depender de Oracle. Necesitas un dominio en Cloudflare.
+
+1. Cloudflare → **Zero Trust → Networks → Tunnels → Create** → tipo *Cloudflared* → copia el token.
+2. En el túnel agrega un *Public hostname*: `pedidos.tudominio.com` → servicio `http://app:3000`.
+3. En `.env`: `CLOUDFLARE_TUNNEL_TOKEN=...`, `PUBLIC_URL=https://pedidos.tudominio.com`, `TRUST_PROXY=cloudflare`.
+4. `docker compose --profile tunnel up -d --build app tunnel` (no se abre ningún puerto del router).
+
+## 8. Actualizar sin perder datos
 
 ```bash
-cd ~/lossantos
-sh scripts/respaldo-externo.sh        # copia previa
-git pull
-docker compose up -d --build
+cd los-santos
+git pull                      # o reemplaza los archivos del código
+sudo docker compose up -d --build
 ```
 
-La migración genera otro respaldo antes de modificar la base. **Nunca** uses `docker compose down -v`: borra los volúmenes `pedidos_data` (pedidos y respaldos) y `caddy_data` (certificados). Ejecuta una sola instancia por base.
+Los volúmenes `pedidos_data` (base, respaldos y fotos) y `caddy_data` (certificados) se conservan. **Nunca** uses `docker compose down -v`. La migración de base crea un respaldo previo automáticamente.
 
-## Sin Docker
+## Red saliente necesaria
 
-Desde un host Node.js 24 con `.env` configurado ejecuta `npm ci`, `npm run build` y `npm start`. Coloca un proxy HTTPS delante del puerto configurado y conserva la cabecera Host original; las mutaciones privadas verifican Origin. Usa un gestor de procesos para reiniciar la app al arrancar el sistema. En producción las cookies Secure requieren HTTPS: para revisar en localhost usa `npm run demo`.
-
-## Red para push y pagos
-
-Permite HTTPS saliente al registro de paquetes durante instalación, `api.mercadopago.com` para pagos y los proveedores que aparezcan en las suscripciones: `fcm.googleapis.com`, `*.push.services.mozilla.com`, `web.push.apple.com`, `*.notify.windows.com`. El servidor rechaza endpoints arbitrarios para evitar usarlo como proxy hacia otras redes.
-
-Para push real prueba al menos: permiso aceptado/rechazado, Android, iPhone instalado en Inicio, app cerrada, conexión temporalmente interrumpida y suscripción expirada. La cola conserva hasta tres intentos y no bloquea cambios de pedido. No se garantizan entrega inmediata ni soporte uniforme de todos los navegadores.
+`api.mercadopago.com` (pagos), proveedores Web Push (`fcm.googleapis.com`, `*.push.services.mozilla.com`, `web.push.apple.com`, `*.notify.windows.com`) y tu almacenamiento de respaldos. La VM de Oracle lo permite por defecto.

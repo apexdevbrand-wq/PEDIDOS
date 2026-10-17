@@ -9,8 +9,10 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { shipBackup, offsiteConfig } from "./offsite.js";
 mkdirSync("data", { recursive: true });
 mkdirSync("data/backups", { recursive: true });
+mkdirSync("data/uploads", { recursive: true });
 const existed = existsSync("data/orders.sqlite");
 export const db = new DatabaseSync("data/orders.sqlite");
 db.exec("PRAGMA busy_timeout=5000");
@@ -43,6 +45,7 @@ function addColumn(table, name, type) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
 }
 addColumn("orders", "zone_id", "INTEGER REFERENCES zones(id)");
+addColumn("zones", "delivery_minutes", "INTEGER NOT NULL DEFAULT 20");
 addColumn("products", "details_json", "TEXT NOT NULL DEFAULT '{}'");
 addColumn("orders", "details_json", "TEXT NOT NULL DEFAULT '{}'");
 addColumn("orders", "request_key", "TEXT");
@@ -82,7 +85,11 @@ export function load() {
   const zones = db
     .prepare("SELECT * FROM zones")
     .all()
-    .map((z) => ({ ...z, active: Boolean(z.active) }));
+    .map(({ delivery_minutes, ...z }) => ({
+      ...z,
+      deliveryMinutes: delivery_minutes ?? 20,
+      active: Boolean(z.active),
+    }));
   const orders = db
     .prepare("SELECT * FROM orders ORDER BY created_at")
     .all()
@@ -123,6 +130,8 @@ export function load() {
     }));
   return { products, zones, orders, ...getMeta("operations", {}) };
 }
+const written = new Map(),
+  pending = new Map();
 export function save(state, audit) {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -141,12 +150,16 @@ export function save(state, audit) {
         JSON.stringify({
           options: x.options || [],
           ingredientIds: x.ingredientIds || [],
+          archived: Boolean(x.archived),
+          featured: Boolean(x.featured),
+          sortOrder: x.sortOrder ?? 0,
         }),
       );
     const z = db.prepare(
-      "INSERT INTO zones VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,fee=excluded.fee,active=excluded.active",
+      "INSERT INTO zones(id,name,fee,active,delivery_minutes) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,fee=excluded.fee,active=excluded.active,delivery_minutes=excluded.delivery_minutes",
     );
-    for (const x of state.zones) z.run(x.id, x.name, x.fee, Number(x.active));
+    for (const x of state.zones)
+      z.run(x.id, x.name, x.fee, Number(x.active), x.deliveryMinutes ?? 20);
     const o = db.prepare(
       "INSERT INTO orders(id,folio,created_at,status,payment_status,customer_name,phone,address,zone_name,delivery,payment,subtotal,shipping,surcharge,total,preference_id,checkout_url,payment_id,payment_error,zone_id,details_json,request_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,payment_status=excluded.payment_status,preference_id=excluded.preference_id,checkout_url=excluded.checkout_url,payment_id=excluded.payment_id,payment_error=excluded.payment_error,details_json=excluded.details_json",
     );
@@ -154,6 +167,11 @@ export function save(state, audit) {
       "INSERT OR IGNORE INTO order_items(order_id,position,product_id,product_name,unit_price,quantity,notes,options_json) VALUES(?,?,?,?,?,?,?,?)",
     );
     for (const x of state.orders) {
+      // Solo se escriben los pedidos que cambiaron desde el último guardado:
+      // con miles de pedidos cada cambio sigue siendo instantáneo.
+      const fingerprint = JSON.stringify(x);
+      if (written.get(x.id) === fingerprint) continue;
+      pending.set(x.id, fingerprint);
       const details = {
         payloadHash: x.payloadHash,
         rejectionReason: x.rejectionReason,
@@ -164,6 +182,8 @@ export function save(state, audit) {
         paidAt: x.paidAt,
         refundRequired: x.refundRequired,
         refundEvents: x.refundEvents,
+        deliveryMinutes: x.deliveryMinutes,
+        readyAt: x.readyAt,
       };
       o.run(
         x.id,
@@ -210,13 +230,17 @@ export function save(state, audit) {
       settings: state.settings,
       ingredients: state.ingredients,
       closures: state.closures || [],
+      categories: state.categories || [],
     });
     if (audit)
       recordAudit(audit.actor, audit.action, audit.target, audit.details);
     db.exec("COMMIT");
+    for (const [id, f] of pending) written.set(id, f);
   } catch (e) {
     db.exec("ROLLBACK");
     throw e;
+  } finally {
+    pending.clear();
   }
 }
 export function listBackups() {
@@ -232,10 +256,25 @@ export function backupPath(name) {
   if (!listBackups().some((b) => b.name === name)) return null;
   return resolve("data/backups", name);
 }
+export const offsiteEnabled = () => Boolean(offsiteConfig());
+export function shipOffsite(backup) {
+  return shipBackup({
+    backupFile: join("data/backups", backup.name),
+    backupName: backup.name,
+    uploadDir: "data/uploads",
+    uploadNames: readdirSync("data/uploads").filter((n) => /^[\w-]+\.(jpg|png|webp)$/.test(n)),
+    getMeta,
+    setMeta,
+  });
+}
 export function startBackups() {
   const run = async () => {
     try {
-      await makeBackup("auto");
+      const backup = await makeBackup("auto");
+      if (offsiteEnabled())
+        await shipOffsite(backup).catch((e) =>
+          console.error("No se pudo copiar el respaldo fuera del servidor:", e.message),
+        );
       const list = listBackups().filter((x) => x.name.startsWith("auto-"));
       for (const item of list.slice(56))
         unlinkSync(join("data/backups", item.name));

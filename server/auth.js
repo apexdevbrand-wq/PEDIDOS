@@ -196,7 +196,23 @@ export function registerAuth(app) {
     res.json({ role: actor?.role || "customer", user: actor });
   });
   app.post("/api/auth/login", sameOrigin, async (req, res) => {
-    const ip = req.socket.remoteAddress || "unknown";
+    // Detrás de Caddy o Cloudflare Tunnel todas las conexiones llegan desde
+    // el proxy; con TRUST_PROXY=1 se usa la IP real del cliente.
+    // TRUST_PROXY=1: último salto de X-Forwarded-For (lo añade Caddy).
+    // TRUST_PROXY=cloudflare: cabecera CF-Connecting-IP de Cloudflare Tunnel.
+    const forwarded =
+      process.env.TRUST_PROXY === "cloudflare"
+        ? String(req.headers["cf-connecting-ip"] || "").trim()
+        : process.env.TRUST_PROXY === "1"
+          ? String(req.headers["x-forwarded-for"] || "")
+              .split(",")
+              .at(-1)
+              .trim()
+          : "";
+    const ip =
+      (forwarded || req.socket.remoteAddress || "unknown") +
+      "|" +
+      String(req.body?.username || "").trim().toLowerCase().slice(0, 40);
     let attempt = attempts.get(ip);
     if (attempt && attempt.until < Date.now()) {
       attempts.delete(ip);

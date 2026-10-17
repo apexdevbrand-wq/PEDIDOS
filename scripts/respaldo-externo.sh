@@ -23,10 +23,14 @@ if [ ! -f "$LOCAL/$NOMBRE" ]; then
   chmod 600 "$LOCAL/$NOMBRE"
 fi
 echo "Respaldo local: $LOCAL/$NOMBRE"
+# Fotos subidas desde Administración → Catálogo (no van dentro del .sqlite).
+mkdir -p "$LOCAL/uploads"
+docker compose cp app:/app/data/uploads/. "$LOCAL/uploads/" 2>/dev/null || true
 find "$LOCAL" -name '*.sqlite' -mtime +"${DIAS_LOCALES:-14}" -delete
 
 if [ -n "${RCLONE_DESTINO:-}" ]; then
   rclone copy "$LOCAL/$NOMBRE" "$RCLONE_DESTINO"
+  rclone copy "$LOCAL/uploads" "$RCLONE_DESTINO/fotos"
   rclone delete --min-age "${DIAS_REMOTOS:-60}d" --include '*.sqlite' "$RCLONE_DESTINO"
   echo "Copiado a $RCLONE_DESTINO"
 else

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
-export async function fixture() {
+export async function fixture(options = {}) {
   const dir = await mkdtemp(join(tmpdir(), "santos-ops-"));
   const listener = net.createServer();
   await new Promise((r) => listener.listen(0, "127.0.0.1", r));
@@ -37,6 +37,7 @@ export async function fixture() {
           STAFF_PASSWORD: "",
           MP_ACCESS_TOKEN: "",
           MP_WEBHOOK_SECRET: "",
+          ...(options.env || {}),
         },
         stdio: ["ignore", "pipe", "pipe"],
       },

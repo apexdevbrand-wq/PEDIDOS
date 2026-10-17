@@ -5,8 +5,12 @@ export const paymentsEnabled = () =>
     process.env.MP_WEBHOOK_SECRET &&
     process.env.PUBLIC_URL?.startsWith("https://"),
   );
+// Solo para pruebas automatizadas: permite un simulador local de la API.
+const MP_BASE = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.MP_API_BASE || "")
+  ? process.env.MP_API_BASE
+  : "https://api.mercadopago.com";
 async function mp(path, options = {}) {
-  const r = await fetch("https://api.mercadopago.com" + path, {
+  const r = await fetch(MP_BASE + path, {
     ...options,
     headers: {
       Authorization: "Bearer " + process.env.MP_ACCESS_TOKEN,
@@ -30,7 +34,7 @@ export async function createPreference(order) {
       items: [
         {
           id: order.id,
-          title: "Los Santos · " + order.folio,
+          title: "Los Santos · Pedido " + order.folio,
           quantity: 1,
           currency_id: "MXN",
           unit_price: order.total / 100,
@@ -42,6 +46,11 @@ export async function createPreference(order) {
         pending: base + "/?payment=return",
       },
       auto_return: "approved",
+      statement_descriptor: "LOS SANTOS",
+      // La preferencia vence en 30 minutos para no cobrar pedidos viejos.
+      expires: true,
+      expiration_date_to: new Date(Date.now() + 30 * 60000).toISOString(),
+      payer: { name: order.name },
       notification_url: base + "/api/payments/webhook",
     }),
   });
@@ -80,3 +89,12 @@ export function validSignature(req) {
 }
 export const fetchPayment = (id) =>
   mp("/v1/payments/" + encodeURIComponent(id));
+export async function searchPayments(externalReference) {
+  const r = await mp(
+    "/v1/payments/search?sort=date_created&criteria=desc&external_reference=" +
+      encodeURIComponent(externalReference),
+  );
+  return (r.results || []).filter(
+    (p) => p.external_reference === externalReference,
+  );
+}

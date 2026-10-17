@@ -1,11 +1,23 @@
-import React, { useState } from "react";
-import { ArrowRight, Clock, MapPin, Plus } from "lucide-react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { MapPin, Bike, ShoppingBag, Plus, Star } from "lucide-react";
 import Cart from "../components/Cart";
 import ProductOptions from "../components/ProductOptions";
+import ProductPhoto from "../components/ProductPhoto";
+import Mascot from "../components/Mascot";
 import { money } from "../api";
+
+const slugify = (s) =>
+  "cat-" +
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[^a-z0-9]+/g, "-");
+
 export default function Shop({ catalog, run, tracking, setTracking }) {
-  const [category, setCategory] = useState("Todo"),
-    [customize, setCustomize] = useState(null),
+  const [customize, setCustomize] = useState(null),
+    [current, setCurrent] = useState(""),
+    [cartOpen, setCartOpen] = useState(false),
+    [bump, setBump] = useState(0),
     [cart, setCart] = useState(() => {
       try {
         return JSON.parse(sessionStorage.getItem("cart") || "[]");
@@ -13,9 +25,64 @@ export default function Shop({ catalog, run, tracking, setTracking }) {
         return [];
       }
     });
-  React.useEffect(() => {
-    sessionStorage.setItem("cart", JSON.stringify(cart));
+  const navRef = useRef(null);
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("cart", JSON.stringify(cart));
+    } catch {}
   }, [cart]);
+
+  const sections = useMemo(() => {
+    const names = catalog.categories?.length
+      ? catalog.categories.map((c) => c.name)
+      : [...new Set(catalog.products.map((p) => p.category))];
+    return names
+      .map((name) => ({
+        name,
+        id: slugify(name),
+        products: catalog.products.filter((p) => p.category === name),
+      }))
+      .filter((s) => s.products.length);
+  }, [catalog.products, catalog.categories]);
+
+  // Resalta la categoría visible mientras la persona recorre el menú.
+  useEffect(() => {
+    if (!sections.length || !("IntersectionObserver" in window)) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (visible) setCurrent(visible.target.id);
+      },
+      { rootMargin: "-140px 0px -55% 0px" },
+    );
+    sections.forEach((s) => {
+      const el = document.getElementById(s.id);
+      if (el) observer.observe(el);
+    });
+    // Arriba, en la portada, ninguna categoría queda marcada.
+    const onScroll = () => {
+      const menu = document.getElementById("menu");
+      if (menu && window.scrollY < menu.offsetTop - 220) setCurrent("");
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", onScroll);
+    };
+  }, [sections]);
+  useEffect(() => {
+    // Solo desplaza la barra de categorías en horizontal; nunca la página.
+    const nav = navRef.current;
+    const chip = nav?.querySelector(`[data-target="${current}"]`);
+    if (nav && chip)
+      nav.scrollTo({
+        left: chip.offsetLeft - nav.clientWidth / 2 + chip.clientWidth / 2,
+        behavior: "smooth",
+      });
+  }, [current]);
+
   function add(p, selections = {}, notes = "") {
     const optionLabels = [];
     let extra = 0;
@@ -43,7 +110,8 @@ export default function Shop({ catalog, run, tracking, setTracking }) {
         : [
             ...current,
             {
-              ...p,
+              id: p.id,
+              name: p.name,
               price: p.price + extra,
               basePrice: p.price,
               selections,
@@ -55,7 +123,33 @@ export default function Shop({ catalog, run, tracking, setTracking }) {
             },
           ],
     );
+    setBump((b) => b + 1);
   }
+
+  const settings = catalog.settings || {};
+  const open = catalog.availability?.open !== false;
+  const count = cart.reduce((s, i) => s + i.quantity, 0);
+  const total = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+  const combosFrom = Math.min(
+    ...catalog.products.filter((p) => p.category === "Combos" && p.active).map((p) => p.price),
+  );
+  const favorites = catalog.products.filter((p) => p.featured && p.active).slice(0, 10);
+  const tagline = (name) => catalog.categories?.find((c) => c.name === name)?.tagline;
+  const pick = (p) => (p.options?.length ? setCustomize(p) : add(p));
+  const fromPrice = (p) => {
+    const required = (p.options || []).filter((g) => g.min > 0);
+    const varies = required.some((g) => g.choices.some((c) => c.price > 0));
+    return (varies ? "desde " : "") + money(p.price).replace(".00", "");
+  };
+  // Personajes que acompañan algunas secciones del menú.
+  const sidekick = (i) =>
+    [
+      ["devil", "antojo"],
+      ["angel", "hola"],
+      ["devil", "guino"],
+      ["angel", "antojo"],
+    ][i % 4];
+
   return (
     <>
       {customize && (
@@ -65,141 +159,214 @@ export default function Shop({ catalog, run, tracking, setTracking }) {
           onAdd={(selections, notes) => add(customize, selections, notes)}
         />
       )}
-      {catalog.availability && !catalog.availability.open && (
-        <div className="business-notice" role="status">
-          <b>Pedidos pausados</b>
-          <span>{catalog.availability.reason}</span>
-          {catalog.availability.until && (
-            <span>
-              Hasta{" "}
-              {new Date(catalog.availability.until).toLocaleTimeString(
-                "es-MX",
-                {
-                  timeZone: catalog.settings?.timezone || "America/Mexico_City",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                },
-              )}
+      <section className="hero">
+        <div className="hero-copy">
+          <h1 aria-label="¿Qué se te antoja hoy?">
+            <span className="h-line">¿Qué se te</span>
+            <span className="h-line">
+              <em>antoja</em> hoy?
             </span>
+          </h1>
+          <p className="hero-tagline">
+            {settings.tagline || "El sabor que te mereces."} Miches, hamburguesas, alitas, la Elotiza
+            y aguachile, hechos al momento en Minatitlán.
+          </p>
+          <div className="hero-actions">
+            <a className="hero-cta" href="#menu">
+              Ver la carta
+            </a>
+            <span className={"status-chip " + (open ? "is-open" : "is-closed")}>
+              <i aria-hidden="true" />
+              {open ? "Recibiendo pedidos" : "Pedidos en pausa"}
+            </span>
+          </div>
+          <ul className="hero-facts">
+            <li>
+              <ShoppingBag size={16} aria-hidden="true" />
+              Pasa a recoger sin costo
+            </li>
+            <li>
+              <Bike size={16} aria-hidden="true" />
+              A domicilio, con tiempo de entrega por colonia
+            </li>
+            {settings.address && (
+              <li>
+                <MapPin size={16} aria-hidden="true" />
+                {settings.address}
+              </li>
+            )}
+          </ul>
+        </div>
+        <div className="hero-board" aria-label="Miche, hamburguesa, elote espolvoreado y esquites">
+          <span className="ribbon hero-ribbon">Drinks, snacks &amp; más</span>
+          <span className="hero-sun" aria-hidden="true" />
+          <img className="hero-item hero-miche" src="/images/products/miche.png" alt="" />
+          <img className="hero-item hero-burger" src="/images/products/hamburguesa-tocino-pina.png" alt="Hamburguesa hawaiana" width="720" height="552" />
+          <img className="hero-item hero-elote" src="/images/products/elote-espolvoreado.png" alt="" />
+          <img className="hero-item hero-esquite" src="/images/products/esquites-vaso-logo.png" alt="" />
+          <Mascot kind="angel" pose="hola" className="hero-angel" />
+          <Mascot kind="devil" pose="guino" tone="#fff" fill="#e10a0a" className="hero-devil" />
+          {Number.isFinite(combosFrom) && (
+            <a className="burst hero-burst" href={"#" + slugify("Combos")}>
+              <small>Combos desde</small>
+              <b>{money(combosFrom).replace(".00", "")}</b>
+            </a>
           )}
         </div>
-      )}
-      <section className="hero">
-        <div>
-          <span className="eyebrow">EL ANTOJO TIENE NOMBRE</span>
-          <h1>
-            Un poco de hambre.
-            <br />
-            Mucho <em>Santos.</em>
-          </h1>
-          <p>
-            Tu próximo antojo favorito, recién preparado.
-            <br />
-            Pide, disfruta y repite.
-          </p>
-          <a className="primary" href="#menu">
-            Explorar el menú
-            <ArrowRight size={18} />
-          </a>
-          <div className="hero-meta">
-            <span>
-              <Clock size={15} />
-              Hecho al momento
-            </span>
-            <span>
-              <MapPin size={15} />
-              Recoge o pide a domicilio
-            </span>
-          </div>
-        </div>
-        <div className="hero-image">
-          <img
-            src="/images/food-1.jpg"
-            alt="Hamburguesa de la casa con queso y vegetales"
-          />
-          <span className="sticker">
-            100%<b>ANTOJO</b>
-            <small>0% CULPA</small>
-          </span>
-          <div className="photo-label">
-            LA FAVORITA DE LA CASA<b>Burger Santa ↗</b>
-          </div>
-        </div>
       </section>
+
+      {!open && (
+        <div className="business-notice" role="status">
+          <Mascot kind="devil" pose="duerme" className="notice-mascot" />
+          <div>
+            <b>Por ahora no estamos recibiendo pedidos.</b>
+            <span>
+              {catalog.availability.reason}
+              {catalog.availability.until &&
+                " Volvemos a las " +
+                  new Date(catalog.availability.until).toLocaleTimeString("es-MX", {
+                    timeZone: settings.timezone || "America/Mexico_City",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }) +
+                  "."}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <nav className="menu-nav" aria-label="Categorías del menú" ref={navRef}>
+        {sections.map((s) => (
+          <a
+            key={s.id}
+            href={"#" + s.id}
+            data-target={s.id}
+            className={current === s.id ? "active" : ""}
+            aria-current={current === s.id ? "true" : undefined}
+          >
+            {s.name}
+          </a>
+        ))}
+      </nav>
+
       <main className="shop-layout" id="menu">
-        <section>
-          <div className="section-title">
-            <div>
-              <span className="eyebrow">ALGO PARA CADA ANTOJO</span>
-              <h2>
-                Nuestro menú<span className="dot">.</span>
-              </h2>
-            </div>
-            <span className="muted">Preparado con todo el sabor.</span>
-          </div>
-          <div className="categories">
-            {["Todo", ...new Set(catalog.products.map((p) => p.category))].map(
-              (c) => (
-                <button
-                  key={c}
-                  className={category === c ? "active" : ""}
-                  onClick={() => setCategory(c)}
-                >
-                  {c}
-                </button>
-              ),
-            )}
-          </div>
-          <div className="product-grid">
-            {catalog.products
-              .filter((p) => category === "Todo" || p.category === category)
-              .map((p) => (
-                <article
-                  key={p.id}
-                  className={"product " + (!p.active ? "soldout" : "")}
-                >
-                  <div className="product-photo">
-                    <img
-                      loading="lazy"
-                      src={p.image}
-                      onError={(e) => {
-                        e.currentTarget.onerror = null;
-                        e.currentTarget.src = "/images/placeholder.svg";
-                      }}
-                      alt={p.name}
-                    />
-                    {!p.active ? (
-                      <span>{p.unavailableReason || "Agotado por ahora"}</span>
-                    ) : (
-                      p.id === 1 && <span className="favorite">★ FAVORITA</span>
-                    )}
-                  </div>
-                  <div className="product-info">
-                    <small>{p.category}</small>
+        <div className="menu-column">
+          {favorites.length > 0 && (
+            <section className="favorites" aria-labelledby="fav-t">
+              <div className="favorites-head">
+                <Mascot kind="devil" pose="antojo" className="fav-mascot" />
+                <div>
+                  <h2 id="fav-t">Los consentidos</h2>
+                  <p>Lo que más se pide en Los Santos.</p>
+                </div>
+              </div>
+              <div className="favorites-track">
+                {favorites.map((p) => (
+                  <article className="fav-card" key={p.id}>
+                    <div className="fav-photo">
+                      <ProductPhoto product={p} />
+                    </div>
                     <h3>{p.name}</h3>
-                    <p>{p.description}</p>
-                    <div className="product-bottom">
-                      <b>{money(p.price)}</b>
+                    <div className="fav-bottom">
+                      <b>{fromPrice(p)}</b>
                       <button
-                        disabled={!p.active}
-                        onClick={() =>
-                          p.options?.length ? setCustomize(p) : add(p)
-                        }
-                        aria-label={"Agregar " + p.name}
+                        className="plus"
+                        disabled={!open}
+                        onClick={() => pick(p)}
+                        aria-label={"Agregar " + p.name + " al pedido"}
                       >
-                        <Plus size={20} />
+                        <Plus size={20} aria-hidden="true" />
                       </button>
                     </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {!sections.length && (
+            <p className="empty-menu">Estamos preparando la carta. Vuelve en un momento.</p>
+          )}
+          <div className="carta-boards">
+            {sections.map((s, i) => {
+              const [kind, pose] = sidekick(i);
+              return (
+                <section key={s.id} id={s.id} className="carta-board" aria-labelledby={s.id + "-t"}>
+                  {tagline(s.name) && <span className="ribbon">{tagline(s.name)}</span>}
+                  <div className="board-panel">
+                    <header className="board-head">
+                      <h2 id={s.id + "-t"}>{s.name}</h2>
+                      {i % 2 === 0 && (
+                        <Mascot
+                          kind={kind}
+                          pose={pose}
+                          tone={kind === "devil" ? "#fff" : undefined}
+                          fill="#c80808"
+                          className="board-mascot"
+                        />
+                      )}
+                    </header>
+                    <ul className="board-list">
+                      {s.products.map((p) => (
+                        <li key={p.id} className={"menu-row" + (!p.active ? " soldout" : "")}>
+                          <button
+                            className="row-hit"
+                            disabled={!p.active || !open}
+                            onClick={() => pick(p)}
+                            aria-label={
+                              p.active
+                                ? `Agregar ${p.name}, ${fromPrice(p)}`
+                                : `${p.name}: agotado por hoy`
+                            }
+                          >
+                            {p.image ? (
+                              <span className="row-thumb">
+                                <ProductPhoto product={p} />
+                              </span>
+                            ) : (
+                              <span className="row-thumb is-empty" aria-hidden="true" />
+                            )}
+                            <span className="row-text">
+                              <span className="row-name">
+                                {p.name}
+                                {p.featured && <Star size={13} className="row-star" aria-hidden="true" />}
+                              </span>
+                              {p.description && <span className="row-desc">{p.description}</span>}
+                              {!p.active && <span className="row-out">Agotado por hoy</span>}
+                            </span>
+                            <span className="row-price">{fromPrice(p)}</span>
+                            <span className="row-plus" aria-hidden="true">
+                              <Plus size={18} />
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                </article>
-              ))}
+                </section>
+              );
+            })}
           </div>
-          <p className="menu-footnote">
-            Buenos ingredientes. Buena compañía. Buenos Santos.
-          </p>
-        </section>
-        <Cart {...{ cart, setCart, catalog, run, tracking, setTracking }} />
+        </div>
+        <Cart
+          {...{ cart, setCart, catalog, run, tracking, setTracking }}
+          open={cartOpen}
+          onClose={() => setCartOpen(false)}
+        />
       </main>
+
+      {(count > 0 || tracking) && !cartOpen && (
+        <button
+          key={bump}
+          className="cart-bar"
+          onClick={() => setCartOpen(true)}
+          aria-label={count ? `Ver pedido: ${count} productos, ${money(total)}` : "Ver seguimiento del pedido"}
+        >
+          <span className="cart-bar-count">{count || "✓"}</span>
+          <span>{count ? "Ver mi pedido" : "Seguir mi pedido"}</span>
+          {count > 0 && <b>{money(total)}</b>}
+        </button>
+      )}
     </>
   );
 }

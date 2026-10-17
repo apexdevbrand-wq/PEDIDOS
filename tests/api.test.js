@@ -193,7 +193,7 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
     const response = await request("/orders", "POST", body, false);
     assert.equal(response.status, 201);
     const order = await response.json();
-    assert.equal(order.total, 28300);
+    assert.equal(order.total, 14500);
     assert.equal(order.surcharge, 0);
     assert.equal(order.zoneId, 1);
     assert.equal(
@@ -226,7 +226,7 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
     );
     assert.equal(
       (await (await request("/orders/" + order.id)).json()).lines[0].price,
-      12900,
+      6000,
     );
     assert.equal(
       (await request("/staff/products/1", "PATCH", { active: false })).status,
@@ -264,7 +264,8 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
     assert.equal(saved.status, "completed");
     assert.equal(saved.lines[0].notes, "Sin cebolla");
     assert.equal(
-      (await (await request("/catalog")).json()).products[0].active,
+      (await (await request("/catalog")).json()).products.find((p) => p.id === 1)
+        .active,
       false,
     );
     const csrf = await fetch(base + "/api/staff/products/1", {

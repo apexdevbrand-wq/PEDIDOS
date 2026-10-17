@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
-import { ShoppingBag, Minus, Plus, ArrowRight, Check } from "lucide-react";
+import { ShoppingBag, Minus, Plus, X } from "lucide-react";
 import { api, money } from "../api";
 import Tracking from "./Tracking";
-import { price as calculate } from "../../server/domain.js";
+import Mascot from "./Mascot";
+import { price as calculate, transferEnabled } from "../../server/domain.js";
 export default function Cart({
   cart,
   setCart,
@@ -10,6 +11,8 @@ export default function Cart({
   run,
   tracking,
   setTracking,
+  open = false,
+  onClose = () => {},
 }) {
   const [delivery, setDelivery] = useState("pickup"),
     [zoneId, setZone] = useState(""),
@@ -49,6 +52,9 @@ export default function Cart({
         )
         .filter((i) => i.quantity > 0),
     );
+  const transferOk = transferEnabled(catalog.settings);
+  const selectedZone =
+    delivery === "delivery" ? catalog.zones.find((z) => z.id === Number(zoneId)) : null;
   const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0),
     shipping =
       delivery === "delivery"
@@ -106,19 +112,41 @@ export default function Cart({
     }
     setBusy(false);
   }
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    document.body.classList.add("sheet-open");
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.classList.remove("sheet-open");
+    };
+  }, [open]);
   return (
-    <aside className="cart">
+    <>
+    {open && <div className="sheet-backdrop" onClick={onClose} aria-hidden="true" />}
+    <aside
+      className={"cart" + (open ? " is-open" : "")}
+      aria-label="Tu pedido"
+      {...(open ? { role: "dialog", "aria-modal": "true" } : {})}
+    >
       <div className="cart-title">
         <h2>
-          <ShoppingBag size={21} />
+          <ShoppingBag size={21} aria-hidden="true" />
           Tu pedido
         </h2>
-        <span>{cart.reduce((s, i) => s + i.quantity, 0)}</span>
+        {cart.length > 0 && (
+          <span className="cart-count">{cart.reduce((s, i) => s + i.quantity, 0)}</span>
+        )}
+        <button className="sheet-close" onClick={onClose} aria-label="Cerrar pedido">
+          <X size={20} />
+        </button>
       </div>
       {tracking && (
         <Tracking
           order={tracking}
           timezone={catalog.settings?.timezone}
+          settings={catalog.settings}
           onHide={() => {
             localStorage.removeItem("tracking");
             setTracking(null);
@@ -126,14 +154,10 @@ export default function Cart({
         />
       )}
       {!cart.length ? (
-        <div className="empty">
-          <ShoppingBag size={38} />
-          <h3>Aquí empieza lo bueno</h3>
-          <p>
-            Agrega tus favoritos y nosotros
-            <br />
-            nos encargamos del antojo.
-          </p>
+        tracking ? null : <div className="empty">
+          <Mascot kind="angel" pose="hola" className="empty-mascot" />
+          <h3>Tu pedido está vacío</h3>
+          <p>Toca “Agregar” en cualquier platillo para empezar.</p>
         </div>
       ) : (
         <form onSubmit={submit}>
@@ -222,10 +246,20 @@ export default function Cart({
                       .map((z) => (
                         <option key={z.id} value={z.id}>
                           {z.name} · {money(z.fee)}
+                          {z.deliveryMinutes ? ` · ~${z.deliveryMinutes} min` : ""}
                         </option>
                       ))}
                   </select>
                 </label>
+                {selectedZone?.deliveryMinutes > 0 && (
+                  <p className="delivery-time" role="status">
+                    <b>Llega unos {selectedZone.deliveryMinutes} min después de salir del local.</b>
+                    <span>
+                      Primero lo preparamos (≈{catalog.settings?.defaultPrepMinutes || 25} min); al
+                      aceptarlo te mostramos la hora exacta.
+                    </span>
+                  </p>
+                )}
                 <label>
                   Dirección y referencias
                   <textarea
@@ -256,7 +290,8 @@ export default function Cart({
                 name="phone"
                 type="tel"
                 required
-                pattern="\+?[0-9\s()\-]{10,20}"
+                pattern="[\d\s+\(\)\-]{10,20}"
+                inputMode="tel"
                 autoComplete="tel"
                 placeholder="10 dígitos"
               />
@@ -271,23 +306,35 @@ export default function Cart({
                 checked={payment === "cash"}
                 onChange={() => setPayment("cash")}
               />
-              Efectivo<small>Sin recargo</small>
+              Efectivo<small>Al recibir o recoger</small>
             </label>
-            <label className="radio">
+            <label className={"radio" + (transferOk ? "" : " is-off")}>
               <input
                 type="radio"
                 name="payment"
+                disabled={!transferOk}
+                checked={payment === "transfer"}
+                onChange={() => setPayment("transfer")}
+              />
+              Transferencia<small>{transferOk ? "Sin recargo" : "No disponible"}</small>
+            </label>
+            {payment === "transfer" && transferOk && (
+              <p className="pay-hint">
+                Al enviar tu pedido te mostramos los datos bancarios y un botón para mandar tu
+                comprobante por WhatsApp. Empezamos a prepararlo en cuanto lo confirmemos.
+              </p>
+            )}
+            <label className={"radio" + (catalog.digitalPayments ? "" : " is-off")}>
+              <input
+                type="radio"
+                name="payment"
+                disabled={!catalog.digitalPayments}
                 checked={payment === "mp"}
                 onChange={() => setPayment("mp")}
               />
-              Mercado Pago<small>+4%</small>
+              Tarjeta (Mercado Pago)
+              <small>{catalog.digitalPayments ? "+4%" : "Muy pronto"}</small>
             </label>
-            {payment === "mp" && !catalog.digitalPayments && (
-              <p className="notice">
-                Mercado Pago está pendiente de conexión. Elige efectivo para
-                confirmar.
-              </p>
-            )}
           </fieldset>
           <div className="totals">
             <div>
@@ -315,21 +362,24 @@ export default function Cart({
               busy ||
               cart.some((i) => !i.available) ||
               catalog.availability?.open === false ||
-              (payment === "mp" && !catalog.digitalPayments)
+              (payment === "mp" && !catalog.digitalPayments) ||
+              (payment === "transfer" && !transferOk)
             }
           >
-            {busy ? "Confirmando…" : "Confirmar pedido"}
-            <ArrowRight size={18} />
+            {busy
+              ? "Enviando pedido…"
+              : `Enviar pedido · ${money(subtotal + shipping + surcharge)}`}
           </button>
-          <small className="muted">
-            El efectivo se cobra al recibir el pedido.
+          <small className="muted checkout-note">
+            {payment === "cash"
+              ? "Pagas en efectivo al recibir o recoger."
+              : payment === "transfer"
+                ? "Después de enviar verás los datos para transferir."
+                : "Te llevaremos a Mercado Pago para pagar."}
           </small>
         </form>
       )}
-      <div className="cart-footer">
-        <Check size={15} />
-        Recién hecho. Como debe ser.
-      </div>
     </aside>
+    </>
   );
 }

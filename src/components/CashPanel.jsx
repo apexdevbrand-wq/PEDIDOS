@@ -50,6 +50,7 @@ export default function CashPanel({ catalog, orders, run }) {
               ["Reembolsos registrados", report.refundedTotal],
               ["Neto cobrado", report.netCollected],
               ["Efectivo cobrado", report.cashCollected],
+              ["Transferencias", report.transferCollected || 0],
               ["Mercado Pago cobrado", report.mpCollected],
               ["Productos", report.productRevenue],
               ["Envíos", report.shippingCollected],
@@ -93,7 +94,7 @@ export default function CashPanel({ catalog, orders, run }) {
                       <tr key={o.folio}>
                         <td>{o.folio}</td>
                         <td>
-                          {o.payment === "cash" ? "Efectivo" : "MP"}
+                          {o.payment === "cash" ? "Efectivo" : o.payment === "transfer" ? "Transferencia" : "MP"}
                           {o.status === "rejected" ? " · Rechazado" : ""}
                         </td>
                         <td>{money(o.total)}</td>
@@ -110,16 +111,7 @@ export default function CashPanel({ catalog, orders, run }) {
                 <div className="line colony-line" key={z.id}>
                   <span>{z.name}</span>
                   <b>
-                    {
-                      orders.filter(
-                        (o) =>
-                          o.zoneId === z.id &&
-                          o.status !== "rejected" &&
-                          new Date(o.createdAt).toLocaleDateString("en-CA", {
-                            timeZone: catalog.settings.timezone,
-                          }) === date,
-                      ).length
-                    }
+                    {report.zones?.[z.id] ?? 0}
                   </b>
                 </div>
               ))}

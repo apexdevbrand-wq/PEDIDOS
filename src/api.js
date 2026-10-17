@@ -29,3 +29,17 @@ export const today = () =>
   new Date().toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
 export const dayOf = (d) =>
   new Date(d).toLocaleDateString("en-CA", { timeZone: "America/Mexico_City" });
+export async function uploadImage(blob) {
+  const r = await fetch("/api/staff/uploads", {
+    method: "POST",
+    headers: { "Content-Type": blob.type },
+    body: blob,
+  });
+  const b = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const error = new Error(b.error || "No se pudo subir la foto");
+    error.status = r.status;
+    throw error;
+  }
+  return b;
+}

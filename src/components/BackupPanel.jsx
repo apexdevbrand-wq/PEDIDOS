@@ -2,9 +2,13 @@ import React, { useState, useEffect } from "react";
 import { api } from "../api";
 export default function BackupPanel({ run }) {
   const [backups, setBackups] = useState([]),
+    [offsite, setOffsite] = useState(null),
+    [shipping, setShipping] = useState(false),
     [busy, setBusy] = useState(false);
   async function load() {
-    setBackups(await api("/staff/backups"));
+    const [list, remote] = await Promise.all([api("/staff/backups"), api("/staff/backups-offsite")]);
+    setBackups(list);
+    setOffsite(remote);
   }
   useEffect(() => {
     run(load);
@@ -34,6 +38,45 @@ export default function BackupPanel({ run }) {
           servidor esté encendido. Se conservan los últimos 56 automáticos; los
           manuales no se eliminan automáticamente.
         </p>
+        {offsite && (
+          <div className={"offsite " + (offsite.configured ? (offsite.lastError ? "is-bad" : "is-ok") : "is-off")}>
+            <b>Copia fuera del servidor</b>
+            {!offsite.configured ? (
+              <p>
+                Sin configurar. Conecta un almacenamiento gratuito (Cloudflare R2) siguiendo
+                docs/DEPLOYMENT.md para que cada respaldo y cada foto se copien solos.
+              </p>
+            ) : (
+              <>
+                <p>
+                  {offsite.lastOkAt
+                    ? "Última copia correcta: " + new Date(offsite.lastOkAt).toLocaleString("es-MX")
+                    : "Aún no se ha enviado ninguna copia."}
+                  {offsite.photos ? ` · ${offsite.photos} foto(s) resguardadas` : ""}
+                </p>
+                {offsite.lastError && (
+                  <p className="stock-warning">
+                    Último error ({new Date(offsite.lastErrorAt).toLocaleString("es-MX")}): {offsite.lastError}
+                  </p>
+                )}
+                <button
+                  className="secondary"
+                  disabled={shipping}
+                  onClick={async () => {
+                    setShipping(true);
+                    await run(async () => {
+                      await api("/staff/backups-offsite", "POST", {});
+                      await load();
+                    });
+                    setShipping(false);
+                  }}
+                >
+                  {shipping ? "Enviando…" : "Respaldar y enviar ahora"}
+                </button>
+              </>
+            )}
+          </div>
+        )}
         <p className="notice">
           Descarga periódicamente un respaldo a otro dispositivo. La copia
           contiene datos de clientes y credenciales protegidas: guárdala en un

@@ -1,5 +1,5 @@
 // No cachea datos personales ni API. La operación de pedidos exige conexión.
-const CACHE = "los-santos-shell-v2";
+const CACHE = "los-santos-shell-v3";
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches

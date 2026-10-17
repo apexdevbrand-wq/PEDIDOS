@@ -1,23 +1,16 @@
 {
   "name": "Los Santos · Pedidos",
   "short_name": "Los Santos",
+  "description": "Drinks, mariscos, hamburguesas, wings y snacks. Pide para recoger o a domicilio.",
   "lang": "es-MX",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#faf8f4",
-  "theme_color": "#e32221",
+  "background_color": "#e10a0a",
+  "theme_color": "#e10a0a",
   "icons": [
-    {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

@@ -1,10 +1,15 @@
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { Flame, UtensilsCrossed, LayoutDashboard } from "lucide-react";
+import "@fontsource/anton/latin.css";
+import "@fontsource-variable/rubik/wght.css";
+import "@fontsource/dm-serif-display/latin-400.css";
+import "@fontsource/dm-serif-display/latin-400-italic.css";
 import { api } from "./api";
 import Shop from "./views/Shop";
 import Kitchen from "./views/Kitchen";
 import Admin from "./views/Admin";
+import Mascot from "./components/Mascot";
 import "./style.css";
 // Retire the old shared browser credential; authorization now lives in an HttpOnly session.
 sessionStorage.removeItem("staffToken");
@@ -55,7 +60,7 @@ function App() {
       if (version !== epoch.current) return;
       setCatalog(nextCatalog);
       if (staff) {
-        const nextOrders = await api("/staff/orders");
+        const nextOrders = await api("/staff/orders?recent=1");
         if (version !== epoch.current) return;
         setOrders(nextOrders);
       } else if (!personal) {
@@ -137,10 +142,9 @@ function App() {
       : [["shop", "Ordenar", UtensilsCrossed]];
   const loginForm = (
     <form onSubmit={login}>
-      <span className="eyebrow">ACCESO RESTRINGIDO</span>
-      <h2 id="login-title">Personal de Los Santos</h2>
+      <h2 id="login-title">Entrada del equipo</h2>
       <p className="muted">
-        Ingresa tu usuario y contraseña. Tus permisos se validan en el servidor.
+        Cocina y administración. Usa la cuenta que te dio el dueño.
       </p>
       <label>
         Usuario
@@ -178,7 +182,7 @@ function App() {
   );
   return (
     <>
-      <header>
+      <header className={staff || personal ? "topbar topbar-staff" : "topbar"}>
         <a
           className="brand"
           href="/"
@@ -189,40 +193,51 @@ function App() {
             }
           }}
         >
-          <span className="halo">◒</span>
-          <span>
-            <b>Los Santos.</b>
-            <small>DRINKS, SNACKS & MÁS</small>
-          </span>
+          <img
+            src="/brand/logo-white.png"
+            alt="Los Santos · Drinks, snacks & más"
+            width="900"
+            height="504"
+          />
         </a>
-        <nav aria-label="Módulos disponibles">
-          {navigation.map(([id, name, Icon]) => (
-            <button
-              className={id === safeView ? "selected" : ""}
-              onClick={() => {
-                setError("");
-                setView(id);
-              }}
-              key={id}
-            >
-              <Icon size={16} />
-              {name}
-            </button>
-          ))}
-        </nav>
+        {navigation.length > 1 && (
+          <nav aria-label="Módulos disponibles">
+            {navigation.map(([id, name, Icon]) => (
+              <button
+                className={id === safeView ? "selected" : ""}
+                aria-current={id === safeView ? "page" : undefined}
+                onClick={() => {
+                  setError("");
+                  setView(id);
+                }}
+                key={id}
+              >
+                <Icon size={16} aria-hidden="true" />
+                {name}
+              </button>
+            ))}
+          </nav>
+        )}
         {staff ? (
           <div className="session-controls">
             <span>
               {user?.displayName ||
-                (role === "owner" ? "Dueño" : "Staff de cocina")}
+                (role === "owner" ? "Dueño" : "Cocina")}
             </span>
             <button onClick={logout}>Cerrar sesión</button>
           </div>
         ) : (
-          <span className="open">
-            <i />
-            Hecho al momento
-          </span>
+          !personal &&
+          catalog.settings?.instagram && (
+            <a
+              className="topbar-social"
+              href={"https://instagram.com/" + catalog.settings.instagram}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              @{catalog.settings.instagram}
+            </a>
+          )
         )}
       </header>
       {error && (
@@ -260,11 +275,51 @@ function App() {
           refresh={refresh}
         />
       ) : null}
-      <footer>
-        <b>Los Santos.</b>
-        <span>El punto de encuentro de tus antojos.</span>
-        <small>PRECIOS EN MXN · IMÁGENES ILUSTRATIVAS</small>
-      </footer>
+      {!staff && !personal && (
+        <footer className="site-footer">
+          <img
+            src="/brand/logo-white.png"
+            alt="Los Santos"
+            width="160"
+            height="88"
+            loading="lazy"
+          />
+          <div>
+            {catalog.settings?.address && <p>{catalog.settings.address}</p>}
+            {catalog.settings?.publicPhone && (
+              <p>
+                <a href={"tel:+" + (catalog.settings.countryCode || "52") + catalog.settings.publicPhone}>
+                  Llámanos: {catalog.settings.publicPhone}
+                </a>
+              </p>
+            )}
+            <p className="footer-links">
+              {catalog.settings?.facebook && (
+                <a href={catalog.settings.facebook} target="_blank" rel="noopener noreferrer">
+                  Facebook
+                </a>
+              )}
+              {catalog.settings?.instagram && (
+                <a href={"https://instagram.com/" + catalog.settings.instagram} target="_blank" rel="noopener noreferrer">
+                  Instagram
+                </a>
+              )}
+              {catalog.settings?.tiktok && (
+                <a href={"https://www.tiktok.com/@" + catalog.settings.tiktok} target="_blank" rel="noopener noreferrer">
+                  TikTok
+                </a>
+              )}
+            </p>
+          </div>
+          <div className="footer-end">
+            <div className="footer-mascots" aria-hidden="true">
+              <Mascot kind="devil" pose="fiesta" tone="#fff" fill="#e10a0a" />
+              <Mascot kind="angel" pose="fiesta" fill="#e10a0a" />
+            </div>
+            <small>Precios en pesos mexicanos. Las fotos son ilustrativas.</small>
+          </div>
+        </footer>
+      )}
     </>
   );
 }

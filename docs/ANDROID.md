@@ -6,7 +6,7 @@
 - Repite el sonido y vibra hasta que alguien pulsa **Silenciar alarma**, o hasta que no quedan pedidos pendientes.
 - Mientras el sonido está activado, la pantalla no se apaga.
 
-En el navegador, Cocina sigue usando el pitido web, ahora repetido cada 3 segundos hasta silenciarlo.
+En el navegador, Cocina reproduce `public/sounds/pedido.wav` en bucle (y pide mantener la pantalla encendida) hasta aceptar o pulsar **Silenciar**; si alguien silencia y el pedido sigue sin aceptarse, vuelve a sonar a los 90 segundos. Un aviso rojo con el diablito muestra cuántos pedidos esperan.
 
 ## Límites (léelos antes de depender de ella)
 
@@ -63,5 +63,5 @@ npx cap open android      # compila y ejecuta desde Android Studio
 - `android-app/capacitor.config.json`: identificador `mx.lossantos.cocina` y dirección del sitio (la fija `scripts/set-url.mjs`).
 - `android-app/android/app/src/main/java/mx/lossantos/cocina/KitchenAlarmPlugin.java`: plugin `KitchenAlarm` (`start`, `stop`, `keepAwake`, `status`).
 - `android-app/android/app/src/main/res/raw/alarma.wav`: tono de alarma, generado con `scripts/alarm-wav.mjs`.
-- `src/hooks/useKitchenSound.js`: detecta si corre dentro de la app y usa el plugin; si no, Web Audio.
+- `src/hooks/useKitchenSound.js`: detecta si corre dentro de la app y usa el plugin `KitchenAlarm` (acepta también `OrderAlarm`, el nombre de la versión 2); si no, reproduce `pedido.wav`. Solo suena por pedidos que se pueden preparar (efectivo o pago confirmado).
 - `.github/workflows/android-apk.yml`: compilación en GitHub Actions.

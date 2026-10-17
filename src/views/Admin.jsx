@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import CashPanel from "../components/CashPanel";
-import MenuAdmin from "../components/MenuAdmin";
+import CatalogAdmin from "../components/CatalogAdmin";
+import DeliveryPanel from "../components/DeliveryPanel";
 import BusinessPanel from "../components/BusinessPanel";
 import TeamPanel from "../components/TeamPanel";
 import BackupPanel from "../components/BackupPanel";
@@ -14,27 +15,23 @@ export default function Admin(props) {
     );
   return (
     <main className="workspace">
-      <div className="section-title">
-        <div>
-          <span className="eyebrow">TODO BAJO CONTROL</span>
-          <h1>
-            Tu negocio, al día<span className="dot">.</span>
-          </h1>
-          <p className="muted">Operación, equipo y finanzas de Los Santos.</p>
-        </div>
-        <span className="badge">Acceso de dueño</span>
+      <div className="admin-head">
+        <h1>Administración</h1>
+        <p className="muted">Menú, ventas, horarios, equipo y respaldos.</p>
       </div>
       <nav className="admin-tabs" aria-label="Secciones de administración">
         {[
           ["cash", "Ventas y caja"],
-          ["menu", "Menú y colonias"],
-          ["business", "Horarios e insumos"],
+          ["catalog", "Catálogo"],
+          ["delivery", "Envíos"],
+          ["business", "Negocio e insumos"],
           ["team", "Equipo y actividad"],
           ["backup", "Respaldos"],
         ].map(([id, label]) => (
           <button
             className={tab === id ? "active" : ""}
             key={id}
+            aria-current={tab === id ? "page" : undefined}
             onClick={() => setTab(id)}
           >
             {label}
@@ -43,8 +40,10 @@ export default function Admin(props) {
       </nav>
       {tab === "cash" ? (
         <CashPanel {...props} />
-      ) : tab === "menu" ? (
-        <MenuAdmin {...props} />
+      ) : tab === "catalog" ? (
+        <CatalogAdmin {...props} />
+      ) : tab === "delivery" ? (
+        <DeliveryPanel {...props} />
       ) : tab === "business" ? (
         <BusinessPanel {...props} />
       ) : tab === "team" ? (

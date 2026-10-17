@@ -19,7 +19,7 @@ export default function BusinessPanel({ catalog, run, refresh }) {
   return (
     <div className="admin-grid">
       <section className="panel">
-        <h2>Horario y recepción de pedidos</h2>
+        <h2>Datos del negocio y horario</h2>
         <form
           onSubmit={async (e) => {
             e.preventDefault();
@@ -45,6 +45,116 @@ export default function BusinessPanel({ catalog, run, refresh }) {
               onChange={(e) => change("businessName", e.target.value)}
             />
           </label>
+          <fieldset className="public-profile">
+            <legend>Pago por transferencia</legend>
+            <p className="muted">
+              Con banco, titular y CLABE o cuenta capturados, el cliente puede elegir
+              transferencia: verá estos datos y un botón para mandar su comprobante por
+              WhatsApp. Cocina confirma el pago antes de preparar.
+            </p>
+            <div className="form-columns">
+              <label>
+                Banco
+                <input
+                  maxLength={80}
+                  value={draft.transferBank || ""}
+                  onChange={(e) => change("transferBank", e.target.value)}
+                  placeholder="Ej. BBVA"
+                />
+              </label>
+              <label>
+                Titular
+                <input
+                  maxLength={80}
+                  value={draft.transferHolder || ""}
+                  onChange={(e) => change("transferHolder", e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="form-columns">
+              <label>
+                CLABE (18 dígitos)
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]{18}"
+                  value={draft.transferClabe || ""}
+                  onChange={(e) => change("transferClabe", e.target.value.replace(/\D/g, "").slice(0, 18))}
+                />
+              </label>
+              <label>
+                Cuenta o tarjeta (opcional)
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]{10,19}"
+                  value={draft.transferAccount || ""}
+                  onChange={(e) => change("transferAccount", e.target.value.replace(/\D/g, "").slice(0, 19))}
+                />
+              </label>
+            </div>
+            <label>
+              WhatsApp para recibir comprobantes (10 dígitos)
+              <input
+                inputMode="numeric"
+                pattern="[0-9]{10,15}"
+                value={draft.receiptWhatsapp || ""}
+                onChange={(e) => change("receiptWhatsapp", e.target.value.replace(/\D/g, ""))}
+              />
+            </label>
+          </fieldset>
+          <fieldset className="public-profile">
+            <legend>Lo que ve el cliente</legend>
+            <label>
+              Frase de la portada
+              <input
+                maxLength={160}
+                value={draft.tagline || ""}
+                onChange={(e) => change("tagline", e.target.value)}
+              />
+            </label>
+            <label>
+              Dirección
+              <input
+                maxLength={160}
+                value={draft.address || ""}
+                onChange={(e) => change("address", e.target.value)}
+              />
+            </label>
+            <div className="form-columns">
+              <label>
+                Teléfono público (opcional)
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]{10,15}"
+                  value={draft.publicPhone || ""}
+                  onChange={(e) => change("publicPhone", e.target.value.replace(/\D/g, ""))}
+                />
+              </label>
+              <label>
+                Instagram (usuario)
+                <input
+                  value={draft.instagram || ""}
+                  onChange={(e) => change("instagram", e.target.value.replace(/^@/, "").trim())}
+                />
+              </label>
+            </div>
+            <div className="form-columns">
+              <label>
+                TikTok (usuario)
+                <input
+                  value={draft.tiktok || ""}
+                  onChange={(e) => change("tiktok", e.target.value.replace(/^@/, "").trim())}
+                />
+              </label>
+              <label>
+                Página de Facebook
+                <input
+                  type="url"
+                  value={draft.facebook || ""}
+                  onChange={(e) => change("facebook", e.target.value.trim())}
+                />
+              </label>
+            </div>
+          </fieldset>
           <div className="form-columns">
             <label>
               Tiempo estimado habitual (min)
@@ -215,7 +325,7 @@ export default function BusinessPanel({ catalog, run, refresh }) {
         <h2>Insumos disponibles</h2>
         <p className="muted">
           Al marcar un insumo como agotado se bloquean los platillos y extras
-          vinculados. Configura sus relaciones en Menú → Opciones e insumos.
+          vinculados. Configura sus relaciones en Catálogo → Opciones de cada producto.
         </p>
         {ingredients.map((i) => (
           <div className="ingredient-row" key={i.id}>

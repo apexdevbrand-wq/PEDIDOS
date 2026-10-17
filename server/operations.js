@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { seedIngredients } from "./seed.js";
+import { sellable } from "./catalog.js";
 export const defaultSettings = {
   businessName: "Los Santos",
   timezone: "America/Mexico_City",
@@ -7,6 +9,19 @@ export const defaultSettings = {
   pausedUntil: null,
   pauseReason: "Estamos preparando muchos antojos. Vuelve en unos minutos.",
   defaultPrepMinutes: 25,
+  // Datos públicos que se muestran en el catálogo.
+  tagline: "El sabor que te mereces.",
+  address: "Constitución 82, Insurgentes Norte, Minatitlán, Ver.",
+  publicPhone: "",
+  instagram: "lossantos__mina",
+  tiktok: "los_santos1drinks",
+  facebook: "https://www.facebook.com/profile.php?id=61582954447251",
+  // Transferencia bancaria (se muestra al cliente) y WhatsApp para comprobantes.
+  transferBank: "",
+  transferHolder: "",
+  transferClabe: "",
+  transferAccount: "",
+  receiptWhatsapp: "9214899319",
   scheduleEnabled: false,
   hours: Array.from({ length: 7 }, () => ({
     enabled: true,
@@ -14,58 +29,29 @@ export const defaultSettings = {
     close: "23:00",
   })),
 };
+// Instalaciones de la primera versión: sus seis productos de demostración no
+// guardaban relaciones de insumos. Solo se completan si siguen sin definirse.
+const legacyDemo = {
+  "Burger Santa": ["res", "pan"],
+  "Papas de la casa": ["papas"],
+  "Alitas BBQ": ["pollo"],
+  "Boneless Buffalo": ["pollo"],
+  "Limonada mineral": ["limon"],
+  "Pizza pepperoni": ["masa", "queso"],
+};
 export function initializeOperations(state) {
-  const first = !state.settings;
   state.settings = { ...defaultSettings, ...state.settings };
-  state.ingredients ??= [
-    { id: "pollo", name: "Pollo", available: true },
-    { id: "res", name: "Carne de res", available: true },
-    { id: "papas", name: "Papas", available: true },
-    { id: "queso", name: "Queso", available: true },
-    { id: "pan", name: "Pan", available: true },
-    { id: "masa", name: "Masa", available: true },
-    { id: "limon", name: "Limón", available: true },
-  ];
+  state.ingredients ??= structuredClone(seedIngredients);
+  for (const id of new Set(Object.values(legacyDemo).flat()))
+    if (
+      state.products.some((p) => p.ingredientIds === undefined && legacyDemo[p.name]?.includes(id)) &&
+      !state.ingredients.some((i) => i.id === id)
+    )
+      state.ingredients.push({ id, name: id === "masa" ? "Masa" : id, available: true });
   state.closures ??= [];
-  const required = {
-    1: ["res", "pan"],
-    2: ["papas"],
-    3: ["pollo"],
-    4: ["pollo"],
-    5: ["limon"],
-    6: ["masa", "queso"],
-  };
   for (const p of state.products) {
-    if (p.ingredientIds === undefined || (first && !p.ingredientIds.length))
-      p.ingredientIds = required[p.id] || [];
-    if (p.options === undefined || (first && !p.options.length))
-      p.options =
-        p.id === 1
-          ? [
-              {
-                id: "extras",
-                name: "Extras",
-                min: 0,
-                max: 3,
-                choices: [
-                  {
-                    id: "queso",
-                    label: "Queso extra",
-                    price: 1500,
-                    active: true,
-                    ingredientIds: ["queso"],
-                  },
-                  {
-                    id: "papas",
-                    label: "Papas extra",
-                    price: 2500,
-                    active: true,
-                    ingredientIds: ["papas"],
-                  },
-                ],
-              },
-            ]
-          : [];
+    if (p.ingredientIds === undefined) p.ingredientIds = legacyDemo[p.name] || [];
+    p.options ??= [];
   }
 }
 export function effectiveProducts(state) {
@@ -89,8 +75,11 @@ export function effectiveProducts(state) {
     return {
       ...p,
       enabled: p.active,
-      active: p.active && !unavailable.length && !missingChoice,
-      unavailableReason: unavailable.length
+      active:
+        p.active && sellable(state, p) && !unavailable.length && !missingChoice,
+      unavailableReason: !sellable(state, p)
+        ? "Archivado u oculto"
+        : unavailable.length
         ? "Insumo agotado: " +
           unavailable.map((i) => i?.name || "desconocido").join(", ")
         : missingChoice
@@ -152,6 +141,17 @@ export function validateSettings(input) {
     "defaultPrepMinutes",
     "scheduleEnabled",
     "hours",
+    "tagline",
+    "address",
+    "publicPhone",
+    "instagram",
+    "tiktok",
+    "facebook",
+    "transferBank",
+    "transferHolder",
+    "transferClabe",
+    "transferAccount",
+    "receiptWhatsapp",
   ];
   if (Object.keys(input).some((k) => !allowed.includes(k)))
     throw Error("Configuración desconocida");
@@ -172,6 +172,36 @@ export function validateSettings(input) {
       input.defaultPrepMinutes > 240)
   )
     throw Error("Tiempo de preparación: 1 a 240 minutos");
+  for (const k of ["tagline", "address"])
+    if (
+      input[k] !== undefined &&
+      (typeof input[k] !== "string" || input[k].length > 160)
+    )
+      throw Error("Texto público demasiado largo (máximo 160)");
+  if (
+    input.publicPhone !== undefined &&
+    !/^(\d{10,15})?$/.test(input.publicPhone)
+  )
+    throw Error("Teléfono público: solo dígitos, 10 a 15");
+  for (const k of ["instagram", "tiktok"])
+    if (input[k] !== undefined && !/^[\w.]{0,40}$/.test(input[k]))
+      throw Error("Usuario de red social inválido (sin @ ni enlaces)");
+  if (
+    input.facebook !== undefined &&
+    !/^(https:\/\/(www\.|m\.)?facebook\.com\/[\w.?=&/-]{1,200})?$/.test(
+      input.facebook,
+    )
+  )
+    throw Error("El enlace de Facebook debe empezar con https://facebook.com/");
+  for (const k of ["transferBank", "transferHolder"])
+    if (input[k] !== undefined && (typeof input[k] !== "string" || input[k].length > 80))
+      throw Error("Banco y titular: máximo 80 caracteres");
+  if (input.transferClabe !== undefined && !/^(\d{18})?$/.test(input.transferClabe))
+    throw Error("La CLABE debe tener 18 dígitos");
+  if (input.transferAccount !== undefined && !/^(\d{10,19})?$/.test(input.transferAccount))
+    throw Error("Cuenta o tarjeta: solo dígitos (10 a 19)");
+  if (input.receiptWhatsapp !== undefined && !/^(\d{10,15})?$/.test(input.receiptWhatsapp))
+    throw Error("WhatsApp para comprobantes: 10 a 15 dígitos");
   if (input.countryCode !== undefined && !/^\d{1,3}$/.test(input.countryCode))
     throw Error("Código de país inválido");
   if (input.timezone !== undefined) {
@@ -313,6 +343,10 @@ export function financialReport(
     netCollected: sum(paid, "total") - refundedTotal,
     cashCollected: sum(
       paid.filter((o) => o.payment === "cash"),
+      "total",
+    ),
+    transferCollected: sum(
+      paid.filter((o) => o.payment === "transfer"),
       "total",
     ),
     mpCollected: sum(

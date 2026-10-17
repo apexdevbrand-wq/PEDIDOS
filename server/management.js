@@ -5,6 +5,9 @@ import {
   listBackups,
   backupPath,
   recordAudit,
+  getMeta,
+  offsiteEnabled,
+  shipOffsite,
 } from "./store.js";
 import {
   validateSettings,
@@ -12,6 +15,7 @@ import {
   financialReport,
 } from "./operations.js";
 import { whatsapp, ticketHtml } from "./messages.js";
+import { paymentLabel } from "./domain.js";
 export function registerManagement(
   app,
   state,
@@ -125,6 +129,19 @@ export function registerManagement(
       date,
       timezone: state.settings.timezone,
     });
+    report.zones = Object.fromEntries(
+      state.zones.map((z) => [
+        z.id,
+        state.orders.filter(
+          (o) =>
+            o.zoneId === z.id &&
+            o.status !== "rejected" &&
+            new Date(o.createdAt).toLocaleDateString("en-CA", {
+              timeZone: state.settings.timezone,
+            }) === date,
+        ).length,
+      ]),
+    );
     if (req.query.format === "csv") {
       const rows = [
         [
@@ -140,7 +157,7 @@ export function registerManagement(
         ...report.orders.map((o) => [
           o.folio,
           o.paidAt,
-          o.payment,
+          paymentLabel(o.payment),
           o.status,
           (o.subtotal / 100).toFixed(2),
           (o.shipping / 100).toFixed(2),
@@ -230,6 +247,23 @@ export function registerManagement(
         error:
           "No se pudo crear el respaldo. Revisa espacio y permisos del disco.",
       });
+    }
+  });
+  app.get("/api/staff/backups-offsite", ownerAccess, (_, res) =>
+    res.json({ configured: offsiteEnabled(), ...getMeta("offsite", {}) }),
+  );
+  app.post("/api/staff/backups-offsite", ownerAccess, async (req, res) => {
+    if (!offsiteEnabled())
+      return res.status(400).json({
+        error: "Falta configurar el almacenamiento externo (variables BACKUP_S3_* en .env).",
+      });
+    try {
+      const backup = await makeBackup("manual");
+      const r = await shipOffsite(backup);
+      recordAudit(req.actor, "backup.offsite", backup.name, { photos: r.photos });
+      res.status(201).json({ ...getMeta("offsite", {}), configured: true });
+    } catch (e) {
+      res.status(502).json({ error: "No se pudo enviar el respaldo: " + e.message });
     }
   });
   app.get("/api/staff/backups/:name", ownerAccess, (req, res) => {
