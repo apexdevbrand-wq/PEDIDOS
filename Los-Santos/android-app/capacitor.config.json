@@ -1,0 +1,12 @@
+{
+  "appId": "mx.lossantos.cocina",
+  "appName": "Los Santos Cocina",
+  "webDir": "www",
+  "server": {
+    "url": "https://pedidos.example.com/personal",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}

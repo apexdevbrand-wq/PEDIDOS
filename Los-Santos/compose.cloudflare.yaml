@@ -1,0 +1,9 @@
+# Usar junto con compose.yaml. Iniciar únicamente app y tunnel.
+services:
+  app:
+    environment:
+      TRUST_PROXY: cloudflare
+  tunnel:
+    depends_on:
+      app:
+        condition: service_healthy

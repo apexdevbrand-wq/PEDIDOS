@@ -1,0 +1,11 @@
+Validación 2026-10-17
+Node 24.19.0; npm 11.9.0.
+npm ci con caché escribible: correcto, sin alterar lockfile ni desactivar verificaciones.
+npm run build: correcto.
+npm test: 40 aprobadas, 0 fallidas, 0 omitidas.
+Docker Compose: configuración combinada válida con plantilla local sin secretos.
+HTTP local: health ok:true, interfaz 200, catálogo 46 productos, SSE conectado.
+Archivos originales del ZIP: idénticos byte por byte.
+PEDIDOS: sin cambios.
+Pendiente: construir/arrancar contenedores en servidor definitivo, token y hostname del túnel, DNS, HTTPS público y prueba completa desde dominio real.
+No se desplegó a Cloudflare. No se incluyeron secretos ni base de datos local.

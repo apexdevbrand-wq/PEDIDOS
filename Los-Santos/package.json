@@ -1,0 +1,32 @@
+{
+  "name": "los-santos-pedidos",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env scripts/run.js dev",
+    "build": "vite build",
+    "start": "node --env-file-if-exists=.env scripts/run.js start",
+    "test": "node --test tests/*.test.js",
+    "demo": "node --env-file-if-exists=.env scripts/run.js demo",
+    "reset-owner": "node --env-file-if-exists=.env scripts/reset-owner.js",
+    "configurar": "node scripts/configure.js",
+    "stress": "node scripts/stress.js"
+  },
+  "dependencies": {
+    "@fontsource-variable/rubik": "^5.3.0",
+    "@fontsource/anton": "^5.3.0",
+    "@fontsource/dm-serif-display": "^5.3.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "express": "^5.1.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.1.0",
+    "vite": "^6.4.1",
+    "web-push": "^3.6.7"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

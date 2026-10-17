@@ -1,0 +1,13 @@
+node_modules
+dist
+data
+.git
+.env
+entregables
+*.log
+
+.env.*
+!.env.example
+android-app
+.github
+respaldos-externos

@@ -1,0 +1,32 @@
+#cloud-config
+# Instala Los Santos al crear la VM de Oracle (Ubuntu 24.04, Ampere A1).
+# Pégalo en: Crear instancia → Mostrar opciones avanzadas → Gestión →
+# "Pegar script de cloud-init". Antes, reemplaza los valores __ENTRE_GUIONES__.
+# El servidor queda listo en ~10 minutos después de encenderse.
+package_update: true
+packages:
+  - git
+  - ca-certificates
+  - curl
+  - iptables-persistent
+write_files:
+  - path: /root/los-santos.env
+    permissions: "0600"
+    content: |
+      DOMAIN=__DOMINIO__
+      PUBLIC_URL=https://__DOMINIO__
+      OWNER_USERNAME=dueno
+      OWNER_PASSWORD=__CONTRASENA_DEL_DUENO__
+      STAFF_USERNAME=cocina
+      STAFF_PASSWORD=__CONTRASENA_DE_COCINA__
+      VAPID_SUBJECT=mailto:__CORREO__
+      TRUST_PROXY=1
+runcmd:
+  - [sh, -c, "curl -fsSL https://get.docker.com | sh"]
+  # Las imágenes de Ubuntu de Oracle bloquean 80/443 en el firewall interno.
+  - [sh, -c, "iptables -I INPUT 6 -p tcp --dport 80 -m state --state NEW -j ACCEPT && iptables -I INPUT 6 -p tcp --dport 443 -m state --state NEW -j ACCEPT && netfilter-persistent save"]
+  - [sh, -c, "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab"]
+  - [sh, -c, "git clone --depth 1 -b lanzamiento-web https://github.com/apexdevbrand-wq/pedidos.git /opt/los-santos"]
+  - [sh, -c, "cp /root/los-santos.env /opt/los-santos/.env && chmod 600 /opt/los-santos/.env"]
+  - [sh, -c, "cd /opt/los-santos && docker compose up -d --build"]
+  # Actualizar la app después: cd /opt/los-santos && sudo git pull && sudo docker compose up -d --build
