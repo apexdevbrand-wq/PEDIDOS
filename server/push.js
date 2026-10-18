@@ -1,7 +1,8 @@
 import { db, push, schedule } from "./runtime.js";
-import { getMeta, setMeta } from "./store-core.js";
+import { getMeta, setMeta, findOrder } from "./store-core.js";
 import { orderMessage } from "./messages.js";
 let keys;
+export const forgetPushKeys = () => (keys = undefined);
 async function vapid() {
   keys ??= getMeta("vapid");
   if (!keys) {
@@ -110,7 +111,7 @@ export async function deliver() {
 export function registerPush(app, state) {
   app.get("/api/push/key", async (_, res) => res.json({ publicKey: (await vapid()).publicKey }));
   app.post("/api/orders/:id/push", (req, res) => {
-    const order = state.orders.find((o) => o.id === req.params.id);
+    const order = findOrder(state, req.params.id);
     if (!order) return res.sendStatus(404);
     if (!validSubscription(req.body))
       return res

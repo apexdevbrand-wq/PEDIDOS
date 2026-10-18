@@ -47,9 +47,32 @@ async function pool(items, size, fn) {
 }
 
 // ── Clientes SSE: cuentan avisos recibidos ──
+// Tiempo real: WebSocket (/api/live, Cloudflare) o SSE (/api/events, Node).
+const LIVE = args.live || "auto";
+let useWs = LIVE === "ws";
+if (LIVE === "auto") {
+  useWs = await new Promise((resolve) => {
+    const ws = new WebSocket(BASE.replace(/^http/, "ws") + "/api/live");
+    ws.onopen = () => (ws.close(), resolve(true));
+    ws.onerror = () => resolve(false);
+  });
+}
 function openStream() {
+  const state = { events: 0, closed: false };
+  if (useWs) {
+    const ws = new WebSocket(BASE.replace(/^http/, "ws") + "/api/live");
+    state.ctrl = { abort: () => ws.close() };
+    state.done = new Promise((resolve) => {
+      ws.onmessage = (e) => e.data === "update" && state.events++;
+      ws.onclose = () => ((state.closed = true), resolve());
+      ws.onerror = () => {};
+    });
+    state.ready = new Promise((r) => (ws.onopen = r));
+    return state;
+  }
   const ctrl = new AbortController();
-  const state = { events: 0, ctrl, closed: false };
+  state.ctrl = ctrl;
+  state.ready = Promise.resolve();
   state.done = fetch(BASE + "/api/events", { signal: ctrl.signal })
     .then(async (r) => {
       const reader = r.body.getReader();
@@ -76,6 +99,7 @@ if (!simple.length) {
   process.exit(2);
 }
 let streams = Array.from({ length: SSE }, openStream);
+await Promise.all(streams.map((s) => s.ready));
 await new Promise((r) => setTimeout(r, 500));
 
 // ── Pedidos simultáneos con 20 % de dobles envíos de la misma compra ──
@@ -167,6 +191,7 @@ const half = streams.slice(0, Math.floor(SSE / 2));
 half.forEach((s) => s.ctrl.abort());
 await Promise.all(half.map((s) => s.done));
 const reopened = half.map(openStream);
+await Promise.all(reopened.map((s) => s.ready));
 await new Promise((r) => setTimeout(r, 300));
 const health = await (await fetch(BASE + "/api/health")).json().catch(() => ({}));
 check("El servidor libera conexiones cerradas", health.clients === undefined || health.clients <= SSE + 2, `clientes conectados: ${health.clients}`);

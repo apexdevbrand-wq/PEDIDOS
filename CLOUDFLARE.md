@@ -1,35 +1,63 @@
-# Preparación para Cloudflare Tunnel
+# Publicar Los Santos en Cloudflare (gratis, sin servidor)
 
-Esta app usa Node.js 24, SQLite, SSE y fotos en disco. Se ejecuta en un servidor propio con disco persistente; Cloudflare Tunnel publica ese servidor con HTTPS. No es un despliegue directo a Pages ni Workers.
+La app corre completa en el plan **Workers Free** de Cloudflare:
 
-## Configurar en el servidor definitivo
+- **Interfaz**: archivos estáticos de `dist/` (gratis y sin límite de visitas).
+- **API, base de datos y fotos**: un Durable Object llamado `Tienda` con su propia base SQLite (`cloudflare/worker.js`). Usa el mismo código que el servidor Node (`server/app.js`).
+- **Tiempo real** (Cocina recibe pedidos al instante): WebSocket con hibernación, que no consume tiempo mientras nadie hace pedidos.
+- **Avisos push**: Web Push con WebCrypto (`cloudflare/webpush.js`).
+- **Respaldos**: automáticos cada 6 h dentro de la base (se descargan como `.json` y se restauran desde Administración → Respaldos). Cloudflare además guarda 30 días de historial de la base. Opcional: copia externa a R2/B2 con las variables `BACKUP_S3_*`.
 
-1. Instala Docker Engine y Docker Compose. Copia este proyecto al servidor.
-2. Copia `.env.cloudflare.example` a `.env` solo si `.env` no existe. Protege el archivo con `chmod 600 .env`. Completa los valores localmente, sin subir credenciales a Git:
-   - `OWNER_PASSWORD`: contraseña inicial larga y única.
-   - `PUBLIC_URL`: URL HTTPS del subdominio, sin diagonal final.
-   - `CLOUDFLARE_TUNNEL_TOKEN`: token del túnel, introducido solo en el servidor.
-   - `VAPID_SUBJECT`: `mailto:` con el correo real de contacto.
-3. En Cloudflare configura un túnel Cloudflared administrado remotamente y su hostname público. Destino HTTP: `http://app:3000`. El dominio debe estar activo en tu cuenta.
-4. Ejecuta desde esta carpeta:
+Límites del plan gratis que aplican (revisados en octubre de 2026): 100 000 peticiones al día, 13 000 GB-s de duración y 100 000 filas escritas al día en Durable Objects, 5 GB de almacenamiento. Un negocio local queda muy por debajo. Al pasar un límite, las operaciones fallan hasta las 18:00 hora del centro de México (00:00 UTC); nunca se cobra sin que cambies de plan.
 
-```sh
-docker compose -f compose.yaml -f compose.cloudflare.yaml --profile tunnel config --quiet
-docker compose -f compose.yaml -f compose.cloudflare.yaml --profile tunnel up -d --build app tunnel
+## Publicar desde GitHub (recomendado)
+
+1. Entra a **dash.cloudflare.com** → **Workers y Pages** → **Crear** → **Importar un repositorio**.
+2. Conecta GitHub y elige `apexdevbrand-wq/pedidos`, rama **`cloudflare`**.
+3. Configuración de compilación:
+   - Nombre del proyecto: `los-santos` (debe coincidir con `wrangler.jsonc`).
+   - Comando de compilación: `npm run build`
+   - Comando de despliegue: `npx wrangler deploy`
+4. Pulsa **Guardar y desplegar**. Cada `git push` a esa rama vuelve a publicar solo.
+5. En el Worker → **Configuración → Variables y secretos**, agrega como **Secreto**:
+   - `OWNER_PASSWORD`: contraseña inicial del usuario `dueno` (12+ caracteres).
+   - `STAFF_PASSWORD`: contraseña inicial del usuario `cocina` (opcional).
+   Vuelve a desplegar. Las cuentas se crean la primera vez; después se administran en **Administración → Equipo**. Puedes borrar estos secretos cuando ya entraste.
+6. Abre `https://los-santos.<tu-subdominio>.workers.dev`. El equipo entra por `/personal`.
+
+## Publicar desde tu computadora (alternativa)
+
+```bash
+npm ci
+npx wrangler login
+npm run deploy:cloudflare
+npx wrangler secret put OWNER_PASSWORD
 ```
 
-El archivo adicional corrige `TRUST_PROXY`: el Compose original fija `1` aunque `.env` indique `cloudflare`. No publiques el puerto 3000 ni arranques el servicio `proxy` para este flujo. El volumen `pedidos_data` conserva base, fotos y respaldos. Nunca ejecutes `down -v`.
+## Dominio
 
-## Comprobar después de conectar Cloudflare
+`*.workers.dev` es gratis y trae HTTPS. Los subdominios de DuckDNS no se pueden conectar a Workers (DuckDNS no admite registros CNAME y Cloudflare exige que el dominio esté en tu cuenta). Para un nombre propio (por ejemplo `lossantosmina.com`, unos US$10 al año) agrégalo a Cloudflare y en el Worker → **Configuración → Dominios y rutas → Agregar dominio personalizado**.
 
-```sh
-docker compose -f compose.yaml -f compose.cloudflare.yaml exec -T app node -e "fetch('http://127.0.0.1:3000/api/health').then(async r=>{if(!r.ok)process.exit(1);console.log(await r.json())})"
+## Variables opcionales
+
+| Variable | Para qué |
+| --- | --- |
+| `OWNER_RESET_PASSWORD` (secreto) | Recuperar el acceso del dueño: se aplica una vez; luego bórrala. |
+| `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET` (secretos), `PUBLIC_URL` | Activar Mercado Pago. |
+| `VAPID_SUBJECT` | Contacto del negocio para los avisos push (ya configurado en `wrangler.jsonc`). |
+| `BACKUP_S3_*` | Copia externa de respaldos y fotos (R2 o Backblaze B2). |
+| `PBKDF2_ITERATIONS` | Costo del cifrado de contraseñas (30 000 por defecto para caber en el límite de CPU del plan gratis). |
+
+## Probar en tu computadora
+
+```bash
+npm run dev:cloudflare        # corre la versión Cloudflare en http://localhost:8787
+npm run test:cloudflare       # las pruebas automáticas contra esa versión
 ```
 
-En el dominio público, `/api/health` debe devolver `ok: true`. Comprueba acceso a `/personal`, inicio de sesión, pedido de prueba y actualización de cocina en tiempo real. Configura una regla de caché para omitir `/api/*`; no bloquees callbacks de pago con Cloudflare Access. Después de verificar el primer acceso, elimina `OWNER_PASSWORD` del archivo: la cuenta ya está en SQLite. No elimines el volumen.
+## Diferencias con el servidor propio (Node/Docker)
 
-Configura respaldos externos antes de recibir pedidos reales; `docs/DEPLOYMENT.md` explica R2. Los respaldos locales no protegen contra pérdida del servidor.
-
-## Validación en este entorno
-
-Consulta `VALIDACION-CLOUDFLARE.txt`. No se ha publicado un túnel ni validado DNS o credenciales de Cloudflare. El alojamiento de onboarding es para desarrollo; requiere un servidor persistente para producción.
+- Respaldos en formato `.json` (en Node son archivos `.sqlite`); se restauran desde el panel.
+- Fotos subidas de hasta 1.8 MB (el panel las reduce antes de subirlas).
+- Para recuperar al dueño se usa `OWNER_RESET_PASSWORD` en lugar de `npm run reset-owner`.
+- La versión con servidor propio sigue disponible: `docs/DEPLOYMENT.md` (Oracle/Docker) y `compose.cloudflare.yaml` (Cloudflare Tunnel hacia un servidor propio).

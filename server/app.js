@@ -7,7 +7,13 @@ import {
   fetchPayment,
   searchPayments,
 } from "./payments.js";
-import { load, save as persist } from "./store-core.js";
+import {
+  load,
+  save as persist,
+  findOrder,
+  findOrderByRequest,
+  loadOrders,
+} from "./store-core.js";
 import { startBackups } from "./backups.js";
 import { realtime } from "./runtime.js";
 const randomUUID = () => crypto.randomUUID();
@@ -102,7 +108,7 @@ export async function createApp(app, { raw }) {
     } catch {
       return res.status(400).json({ error: "Carrito inválido" });
     }
-    const previous = state.orders.find((o) => o.requestId === b.requestId);
+    const previous = findOrderByRequest(state, b.requestId);
     if (previous && previous.payloadHash !== hash)
       return res.status(409).json({
         error:
@@ -208,14 +214,14 @@ export async function createApp(app, { raw }) {
     }
   });
   app.get("/api/orders/:id", (req, res) => {
-    const o = state.orders.find((o) => o.id === req.params.id);
+    const o = findOrder(state, req.params.id);
     if (!o) return res.sendStatus(404);
     res.json(o);
   });
   // ?recent=1 (Cocina): pedidos abiertos y los cerrados de las últimas 24 h,
   // para no enviar todo el historial a cada tableta en cada actualización.
   app.get("/api/staff/orders", kitchenAccess, (req, res) => {
-    if (!req.query.recent) return res.json(state.orders);
+    if (!req.query.recent) return res.json(loadOrders());
     const since = Date.now() - 24 * 60 * 60 * 1000;
     res.json(
       state.orders.filter(
@@ -226,7 +232,7 @@ export async function createApp(app, { raw }) {
     );
   });
   app.patch("/api/staff/orders/:id", kitchenAccess, (req, res) => {
-    const o = state.orders.find((o) => o.id === req.params.id);
+    const o = findOrder(state, req.params.id);
     if (!o) return res.sendStatus(404);
     const b = req.body,
       status = b.status || o.status;
@@ -401,9 +407,8 @@ export async function createApp(app, { raw }) {
     try {
       const id = String(req.query["data.id"]);
       const p = await fetchPayment(id);
-      const o = state.orders.find(
-        (o) => o.id === p.external_reference && o.payment === "mp",
-      );
+      const found = findOrder(state, String(p.external_reference || ""));
+      const o = found?.payment === "mp" ? found : null;
       if (!o) return res.sendStatus(200);
       if (String(p.id) !== id) return res.sendStatus(400);
       try {
@@ -418,7 +423,7 @@ export async function createApp(app, { raw }) {
   });
   // Transferencia: Cocina confirma que llegó el comprobante y el dinero.
   app.post("/api/staff/orders/:id/confirm-transfer", kitchenAccess, (req, res) => {
-    const o = state.orders.find((o) => o.id === req.params.id);
+    const o = findOrder(state, req.params.id);
     if (!o) return res.sendStatus(404);
     if (o.payment !== "transfer")
       return res.status(400).json({ error: "Este pedido no es por transferencia" });
@@ -440,7 +445,7 @@ export async function createApp(app, { raw }) {
   // Respaldo si el webhook no llegó: Cocina consulta el pago por referencia.
   const checking = new Set();
   app.post("/api/staff/orders/:id/payment-check", kitchenAccess, async (req, res) => {
-    const o = state.orders.find((o) => o.id === req.params.id);
+    const o = findOrder(state, req.params.id);
     if (!o) return res.sendStatus(404);
     if (o.payment !== "mp")
       return res.status(400).json({ error: "Este pedido no se pagó con Mercado Pago" });

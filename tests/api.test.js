@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawnServer, stopServer, target } from "./support/spawn.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,13 +23,10 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
   async function start(mode = "production", credentials = true) {
     output = "";
     spawnError = null;
-    child = spawn(
-      process.execPath,
-      [fileURLToPath(new URL("../server/index.js", import.meta.url))],
-      {
-        cwd: dir,
-        env: {
-          ...process.env,
+    child = await spawnServer({
+      dir,
+      port,
+      env: {
           NODE_ENV: mode,
           SERVE_BUILD: "1",
           PORT: String(port),
@@ -37,10 +34,8 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
           OWNER_TOKEN: credentials ? token : "",
           MP_ACCESS_TOKEN: "",
           MP_WEBHOOK_SECRET: "",
-        },
-        stdio: ["ignore", "pipe", "pipe"],
       },
-    );
+    });
     for (const stream of [child.stdout, child.stderr])
       stream.on("data", (b) => {
         output = (output + b.toString()).slice(-12000);
@@ -48,7 +43,7 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
     child.on("error", (e) => {
       spawnError = e;
     });
-    const deadline = Date.now() + 30000;
+    const deadline = Date.now() + (target === "cloudflare" ? 90000 : 30000);
     while (Date.now() < deadline) {
       if (spawnError || child.exitCode !== null || child.signalCode !== null)
         throw Error("Fallo de arranque: " + (spawnError?.message || output));
@@ -67,11 +62,7 @@ test("API: autenticación, pedidos, cocina, snapshots y persistencia", async () 
     throw Error("El servidor no respondió en 30 segundos. " + output);
   }
   async function stop() {
-    const proc = child;
-    if (proc?.exitCode === null) {
-      proc.kill("SIGTERM");
-      await new Promise((r) => proc.once("exit", r));
-    }
+    await stopServer(child);
   }
   async function request(path, method = "GET", body, staff = true) {
     return fetch(base + "/api" + path, {

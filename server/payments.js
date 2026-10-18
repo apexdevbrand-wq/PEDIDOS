@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac } from "node:crypto";
 export const paymentsEnabled = () =>
   Boolean(
     process.env.MP_ACCESS_TOKEN &&
@@ -6,11 +6,12 @@ export const paymentsEnabled = () =>
     process.env.PUBLIC_URL?.startsWith("https://"),
   );
 // Solo para pruebas automatizadas: permite un simulador local de la API.
-const MP_BASE = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.MP_API_BASE || "")
-  ? process.env.MP_API_BASE
-  : "https://api.mercadopago.com";
+const mpBase = () =>
+  /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.MP_API_BASE || "")
+    ? process.env.MP_API_BASE
+    : "https://api.mercadopago.com";
 async function mp(path, options = {}) {
-  const r = await fetch(MP_BASE + path, {
+  const r = await fetch(mpBase() + path, {
     ...options,
     headers: {
       Authorization: "Bearer " + process.env.MP_ACCESS_TOKEN,
@@ -84,7 +85,7 @@ export function validSignature(req) {
     .digest("hex");
   return (
     /^[a-f0-9]{64}$/i.test(parts.v1) &&
-    timingSafeEqual(Buffer.from(digest), Buffer.from(parts.v1.toLowerCase()))
+    sameHex(digest, parts.v1.toLowerCase())
   );
 }
 export const fetchPayment = (id) =>
@@ -97,4 +98,9 @@ export async function searchPayments(externalReference) {
   return (r.results || []).filter(
     (p) => p.external_reference === externalReference,
   );
+}
+function sameHex(a, b) {
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ (b.charCodeAt(i) || 0);
+  return diff === 0;
 }

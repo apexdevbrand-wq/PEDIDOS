@@ -65,7 +65,9 @@ async function pbkdf2(password, salt, iterations) {
   );
   return PBKDF2 + iterations + "$" + hex(bits);
 }
-const iterations = () => Number(process.env.PBKDF2_ITERATIONS) || 100000;
+// 30 000 vueltas ≈ 5 ms: cabe en el límite de 10 ms de CPU por petición del
+// plan gratis de Cloudflare. Con límite mayor se puede subir con la variable.
+const iterations = () => Number(process.env.PBKDF2_ITERATIONS) || 30000;
 async function passwordHash(password, salt, scheme = platform === "cloudflare" ? "pbkdf2" : "scrypt") {
   if (scheme === "pbkdf2") return pbkdf2(password, salt, iterations());
   if (scheme.startsWith(PBKDF2)) return pbkdf2(password, salt, Number(scheme.split("$")[1]));
@@ -414,9 +416,9 @@ export function registerUserRoutes(app, ownerAccess) {
     ),
   );
 }
-export async function resetOwnerFromEnvironment() {
+export async function resetOwnerFromEnvironment(override) {
   const username = process.env.OWNER_USERNAME || "dueno",
-    password = process.env.OWNER_PASSWORD || process.env.OWNER_TOKEN;
+    password = override || process.env.OWNER_PASSWORD || process.env.OWNER_TOKEN;
   if (
     typeof password !== "string" ||
     password.length < 12 ||

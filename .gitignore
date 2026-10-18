@@ -9,3 +9,4 @@ data/
 respaldos-externos/
 
 !.env.cloudflare.example
+.wrangler/

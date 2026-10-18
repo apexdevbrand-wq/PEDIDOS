@@ -1,6 +1,6 @@
 {
   "name": "los-santos-pedidos",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,10 @@
     "demo": "node --env-file-if-exists=.env scripts/run.js demo",
     "reset-owner": "node --env-file-if-exists=.env scripts/reset-owner.js",
     "configurar": "node scripts/configure.js",
-    "stress": "node scripts/stress.js"
+    "stress": "node scripts/stress.js",
+    "test:cloudflare": "TEST_TARGET=cloudflare node --test --test-concurrency=2 tests/*.test.js",
+    "dev:cloudflare": "npm run build && wrangler dev",
+    "deploy:cloudflare": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@fontsource-variable/rubik": "^5.3.0",
@@ -28,5 +31,8 @@
   },
   "engines": {
     "node": ">=24"
+  },
+  "devDependencies": {
+    "wrangler": "^4.151.1"
   }
 }

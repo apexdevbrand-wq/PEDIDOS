@@ -368,7 +368,7 @@ export function registerCatalog(app, state, { ownerAccess, publish, effective, r
       const body = req.body instanceof Uint8Array ? req.body : null;
       if (!body?.length)
         return res.status(400).json({
-          error: `Sube una imagen JPG, PNG o WebP de hasta ${limits.maxUpload / 1048576} MB.`,
+          error: `Sube una imagen JPG, PNG o WebP de hasta ${Math.floor((limits.maxUpload / 1048576) * 10) / 10} MB.`,
         });
       const ext = sniffImage(body);
       if (!ext)
@@ -384,7 +384,7 @@ export function registerCatalog(app, state, { ownerAccess, publish, effective, r
     if (err?.type === "entity.too.large")
       return res
         .status(413)
-        .json({ error: `La foto pesa más de ${limits.maxUpload / 1048576} MB. Usa una más ligera.` });
+        .json({ error: `La foto pesa más de ${Math.floor((limits.maxUpload / 1048576) * 10) / 10} MB. Usa una más ligera.` });
     next(err);
   });
 }

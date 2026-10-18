@@ -94,16 +94,71 @@ function App() {
   }
   useEffect(() => {
     refresh();
-    const source = new EventSource("/api/events");
-    let opened = false;
-    source.onopen = () => {
+    // Tiempo real: WebSocket en Cloudflare (/api/live) o, si no existe,
+    // EventSource en el servidor Node (/api/events). Reconecta solo.
+    let closed = false,
+      socket = null,
+      source = null,
+      retry = null,
+      ping = null,
+      poll = null,
+      opened = false,
+      attempts = 0;
+    const onOpen = () => {
       setConnected(true);
       if (opened) refresh();
       opened = true;
+      attempts = 0;
     };
-    source.onerror = () => setConnected(false);
-    source.onmessage = () => refresh();
-    return () => source.close();
+    const useEventSource = () => {
+      source = new EventSource("/api/events");
+      source.onopen = onOpen;
+      source.onerror = () => setConnected(false);
+      source.onmessage = () => refresh();
+    };
+    const connect = () => {
+      if (closed) return;
+      const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/live");
+      let wasOpen = false;
+      socket = ws;
+      ws.onopen = () => {
+        wasOpen = true;
+        onOpen();
+        clearInterval(ping);
+        ping = setInterval(() => ws.readyState === 1 && ws.send("ping"), 30000);
+        // Horarios y pausas que vencen: se revisa el catálogo cada minuto.
+        clearInterval(poll);
+        poll = setInterval(() => document.visibilityState === "visible" && refresh(), 60000);
+      };
+      ws.onmessage = (e) => e.data === "update" && refresh();
+      ws.onclose = () => {
+        setConnected(false);
+        clearInterval(ping);
+        if (closed) return;
+        if (!wasOpen && !opened && attempts >= 1) return useEventSource();
+        attempts++;
+        retry = setTimeout(connect, Math.min(15000, 1000 * 2 ** Math.min(attempts, 4)));
+      };
+    };
+    connect();
+    const wake = () => {
+      if (document.visibilityState !== "visible") return;
+      if (socket && socket.readyState > 1) {
+        clearTimeout(retry);
+        connect();
+      }
+      refresh();
+    };
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      closed = true;
+      clearTimeout(retry);
+      clearInterval(ping);
+      clearInterval(poll);
+      socket?.close();
+      source?.close();
+      document.removeEventListener("visibilitychange", wake);
+    };
   }, [safeView, role]);
   async function run(fn) {
     setError("");

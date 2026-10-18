@@ -60,52 +60,108 @@ export function load() {
       deliveryMinutes: delivery_minutes ?? 20,
       active: Boolean(z.active),
     }));
+  // En memoria solo los pedidos activos y los de los últimos días. Los
+  // anteriores se consultan en la base cuando hacen falta (seguimiento,
+  // reportes, reembolsos): así arrancar cuesta lo mismo con 10 o 10 000.
+  const orders = loadOrders(
+    "WHERE status IN ('pending','cooking','ready') OR created_at >= ?",
+    recentCutoff(),
+  );
+  const operations = getMeta("operations", {});
+  // Lo recién leído ya está en la base: solo se reescribe si cambia.
+  for (const p of products) written.set("p:" + p.id, JSON.stringify(p));
+  for (const z of zones) written.set("z:" + z.id, JSON.stringify(z));
+  for (const o of orders) written.set(o.id, JSON.stringify(o));
+  written.set(
+    "operations",
+    JSON.stringify({
+      settings: operations.settings,
+      ingredients: operations.ingredients,
+      closures: operations.closures || [],
+      categories: operations.categories || [],
+    }),
+  );
+  return { products, zones, orders, ...operations };
+}
+const RECENT_DAYS = 3;
+const recentCutoff = () => new Date(Date.now() - RECENT_DAYS * 86400000).toISOString();
+const isRecent = (o) => ["pending", "cooking", "ready"].includes(o.status) || o.createdAt >= recentCutoff();
+function mapOrder(o, items) {
+  return {
+    ...parse(o.details_json),
+    id: o.id,
+    folio: o.folio,
+    createdAt: o.created_at,
+    status: o.status,
+    paymentStatus: o.payment_status,
+    name: o.customer_name,
+    phone: o.phone,
+    address: o.address,
+    zone: o.zone_name,
+    zoneId: o.zone_id,
+    delivery: o.delivery,
+    payment: o.payment,
+    subtotal: o.subtotal,
+    shipping: o.shipping,
+    surcharge: o.surcharge,
+    total: o.total,
+    preferenceId: o.preference_id,
+    checkoutUrl: o.checkout_url,
+    paymentId: o.payment_id,
+    paymentError: Boolean(o.payment_error),
+    requestId: o.request_key,
+    lines: (items.get(o.id) || []).map((i) => ({
+      ...parse(i.options_json),
+      id: i.product_id,
+      name: i.product_name,
+      price: i.unit_price,
+      quantity: i.quantity,
+      notes: i.notes,
+    })),
+  };
+}
+// Pedidos de la base con un filtro SQL sobre la tabla orders.
+export function loadOrders(where = "", ...args) {
+  const rows = db.prepare(`SELECT * FROM orders ${where} ORDER BY created_at`).all(...args);
+  if (!rows.length) return [];
   const items = new Map();
-  for (const i of db
-    .prepare("SELECT * FROM order_items ORDER BY order_id, position")
-    .all()) {
-    if (!items.has(i.order_id)) items.set(i.order_id, []);
-    items.get(i.order_id).push(i);
+  const ids = rows.map((r) => r.id);
+  for (let i = 0; i < ids.length; i += 90) {
+    const chunk = ids.slice(i, i + 90);
+    for (const row of db
+      .prepare(`SELECT * FROM order_items WHERE order_id IN (${chunk.map(() => "?").join(",")}) ORDER BY order_id, position`)
+      .all(...chunk)) {
+      if (!items.has(row.order_id)) items.set(row.order_id, []);
+      items.get(row.order_id).push(row);
+    }
   }
-  const orders = db
-    .prepare("SELECT * FROM orders ORDER BY created_at")
-    .all()
-    .map((o) => ({
-      ...parse(o.details_json),
-      id: o.id,
-      folio: o.folio,
-      createdAt: o.created_at,
-      status: o.status,
-      paymentStatus: o.payment_status,
-      name: o.customer_name,
-      phone: o.phone,
-      address: o.address,
-      zone: o.zone_name,
-      zoneId: o.zone_id,
-      delivery: o.delivery,
-      payment: o.payment,
-      subtotal: o.subtotal,
-      shipping: o.shipping,
-      surcharge: o.surcharge,
-      total: o.total,
-      preferenceId: o.preference_id,
-      checkoutUrl: o.checkout_url,
-      paymentId: o.payment_id,
-      paymentError: Boolean(o.payment_error),
-      requestId: o.request_key,
-      lines: (items.get(o.id) || []).map((i) => ({
-          ...parse(i.options_json),
-          id: i.product_id,
-          name: i.product_name,
-          price: i.unit_price,
-          quantity: i.quantity,
-          notes: i.notes,
-        })),
-    }));
-  return { products, zones, orders, ...getMeta("operations", {}) };
+  return rows.map((o) => mapOrder(o, items));
+}
+// Busca un pedido en memoria o en la base; si estaba guardado, lo vuelve a
+// poner en memoria para que sus cambios se guarden.
+function remember(state, found) {
+  if (found) state.orders.push(found);
+  return found || null;
+}
+export function findOrder(state, id) {
+  return (
+    state.orders.find((o) => o.id === id) ||
+    (typeof id === "string" && id.length <= 64 ? remember(state, loadOrders("WHERE id=?", id)[0]) : null)
+  );
+}
+export function findOrderByRequest(state, key) {
+  return state.orders.find((o) => o.requestId === key) || remember(state, loadOrders("WHERE request_key=?", key)[0]);
+}
+// Pedidos que pueden contar para un reporte desde una fecha (cobros y
+// reembolsos posteriores a la compra): margen de 60 días hacia atrás.
+export function ordersForReport(fromIso) {
+  const since = new Date(new Date(fromIso || 0).getTime() - 60 * 86400000).toISOString();
+  return loadOrders("WHERE created_at >= ?", since);
 }
 const written = new Map(),
   pending = new Map();
+// Tras restaurar un respaldo la base ya no coincide con lo último escrito.
+export const forgetWrites = () => written.clear();
 export function save(state, audit) {
   try {
     db.transaction(() => writeState(state, audit));
@@ -113,6 +169,12 @@ export function save(state, audit) {
   } finally {
     pending.clear();
   }
+  // Sacar de memoria los pedidos viejos ya guardados.
+  for (let i = state.orders.length - 1; i >= 0; i--)
+    if (!isRecent(state.orders[i])) {
+      written.delete(state.orders[i].id);
+      state.orders.splice(i, 1);
+    }
 }
 function writeState(state, audit) {
   {

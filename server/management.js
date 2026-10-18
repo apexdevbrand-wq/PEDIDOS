@@ -1,4 +1,5 @@
-import { recordAudit, getMeta } from "./store-core.js";
+import { recordAudit, getMeta, findOrder, ordersForReport } from "./store-core.js";
+import { platform } from "./runtime.js";
 import {
   makeBackup,
   listBackups,
@@ -92,7 +93,7 @@ export function registerManagement(
     }
   });
   app.get("/api/staff/orders/:id/whatsapp", kitchenAccess, (req, res) => {
-    const o = state.orders.find((o) => o.id === req.params.id);
+    const o = findOrder(state, req.params.id);
     if (!o) return res.sendStatus(404);
     try {
       res.json(whatsapp(o, state.settings));
@@ -101,7 +102,7 @@ export function registerManagement(
     }
   });
   const ticket = (req, res) => {
-    const o = state.orders.find((o) => o.id === req.params.id);
+    const o = findOrder(state, req.params.id);
     if (!o) return res.sendStatus(404);
     res.set("Cache-Control", "no-store");
     res.json({
@@ -122,14 +123,15 @@ export function registerManagement(
       });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
       return res.status(400).json({ error: "Fecha inválida" });
-    const report = financialReport(state.orders, {
+    const orders = ordersForReport(date + "T00:00:00Z");
+    const report = financialReport(orders, {
       date,
       timezone: state.settings.timezone,
     });
     report.zones = Object.fromEntries(
       state.zones.map((z) => [
         z.id,
-        state.orders.filter(
+        orders.filter(
           (o) =>
             o.zoneId === z.id &&
             o.status !== "rejected" &&
@@ -209,7 +211,7 @@ export function registerManagement(
     if (prior) return res.json(prior);
     const from = state.closures.at(-1)?.to || null,
       to = new Date().toISOString(),
-      report = financialReport(state.orders, {
+      report = financialReport(ordersForReport(from), {
         from,
         to,
         timezone: state.settings.timezone,
@@ -247,7 +249,7 @@ export function registerManagement(
     }
   });
   app.get("/api/staff/backups-offsite", ownerAccess, (_, res) =>
-    res.json({ configured: offsiteEnabled(), ...getMeta("offsite", {}) }),
+    res.json({ configured: offsiteEnabled(), platform, ...getMeta("offsite", {}) }),
   );
   app.post("/api/staff/backups-offsite", ownerAccess, async (req, res) => {
     if (!offsiteEnabled())

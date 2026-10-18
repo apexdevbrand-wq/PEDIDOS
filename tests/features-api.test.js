@@ -1,6 +1,6 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { fixture } from "./support/server.js";
+import { fixture, target } from "./support/server.js";
 describe("Operación completa", () => {
   let f;
   before(async () => {
@@ -234,12 +234,12 @@ describe("Operación completa", () => {
     assert.ok(backups.length);
     const download = await f.request("/staff/backups/" + backups[0].name);
     assert.equal(download.status, 200);
-    assert.equal(
-      Buffer.from(await download.arrayBuffer())
-        .subarray(0, 15)
-        .toString(),
-      "SQLite format 3",
-    );
+    const file = Buffer.from(await download.arrayBuffer());
+    if (target === "cloudflare") {
+      const data = JSON.parse(file);
+      assert.equal(data.format, "los-santos-backup");
+      assert.ok(data.tables.orders.some((row) => row.id === o.id));
+    } else assert.equal(file.subarray(0, 15).toString(), "SQLite format 3");
     assert.equal(
       (await f.request("/staff/backups", "GET", undefined, "staff")).status,
       403,

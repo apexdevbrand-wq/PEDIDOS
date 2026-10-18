@@ -23,7 +23,7 @@ test("firma SigV4 coincide con el ejemplo publicado por AWS", () => {
 });
 
 import http from "node:http";
-import { fixture } from "./support/server.js";
+import { fixture, target } from "./support/server.js";
 
 test("envía respaldo y fotos a un almacenamiento S3 con firma válida", async () => {
   const received = new Map();
@@ -74,10 +74,12 @@ test("envía respaldo y fotos a un almacenamiento S3 con firma válida", async (
     const status = await r.json();
     assert.equal(status.lastError, null);
     const keys = [...received.keys()];
-    assert.ok(keys.some((k) => /^\/respaldos\/los-santos\/backups\/(auto|manual)-.*\.sqlite$/.test(k)), keys.join());
+    const ext = target === "cloudflare" ? "json" : "sqlite";
+    assert.ok(keys.some((k) => new RegExp(`^/respaldos/los-santos/backups/(auto|manual)-.*\\.${ext}$`).test(k)), keys.join());
     assert.ok(keys.some((k) => /^\/respaldos\/los-santos\/uploads\/[\w-]+\.png$/.test(k)));
-    const sqlite = [...received.entries()].find(([k]) => k.endsWith(".sqlite"))[1];
-    assert.equal(sqlite.subarray(0, 15).toString(), "SQLite format 3");
+    const file = [...received.entries()].find(([k]) => k.endsWith("." + ext))[1];
+    if (target === "cloudflare") assert.equal(JSON.parse(file).format, "los-santos-backup");
+    else assert.equal(file.subarray(0, 15).toString(), "SQLite format 3");
     const before = received.size;
     await f.request("/staff/backups-offsite", "POST", {});
     assert.equal(received.size, before + 1, "las fotos ya enviadas no se reenvían");

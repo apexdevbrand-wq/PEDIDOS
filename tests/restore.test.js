@@ -4,9 +4,11 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { fixture } from "./support/server.js";
+import { fixture, target } from "./support/server.js";
+// Restaurar un archivo .sqlite y migrar bases antiguas solo aplica a Node.
+const nodeOnly = { skip: target === "cloudflare" && "solo servidor Node" };
 const execute = promisify(execFile);
-test("restauración conserva la base anterior y rechaza restaurar con el servidor encendido", async () => {
+test("restauración conserva la base anterior y rechaza restaurar con el servidor encendido", nodeOnly, async () => {
   const f = await fixture();
   try {
     await f.start();
@@ -47,7 +49,7 @@ test("restauración conserva la base anterior y rechaza restaurar con el servido
 });
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, readFileSync } from "node:fs";
-test("actualizar desde la versión anterior conserva pedidos y genera respaldo previo", async () => {
+test("actualizar desde la versión anterior conserva pedidos y genera respaldo previo", nodeOnly, async () => {
   const f = await fixture();
   try {
     mkdirSync(join(f.dir, "data"));

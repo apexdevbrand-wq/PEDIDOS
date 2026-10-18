@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawnServer, stopServer, target } from "./spawn.js";
+export { target };
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,13 +22,10 @@ export async function fixture(options = {}) {
   async function start() {
     output = "";
     spawnError = null;
-    child = spawn(
-      process.execPath,
-      [fileURLToPath(new URL("../../server/index.js", import.meta.url))],
-      {
-        cwd: dir,
-        env: {
-          ...process.env,
+    child = await spawnServer({
+      dir,
+      port,
+      env: {
           NODE_ENV: "production",
           SERVE_BUILD: "1",
           PORT: String(port),
@@ -38,10 +36,8 @@ export async function fixture(options = {}) {
           MP_ACCESS_TOKEN: "",
           MP_WEBHOOK_SECRET: "",
           ...(options.env || {}),
-        },
-        stdio: ["ignore", "pipe", "pipe"],
       },
-    );
+    });
     for (const stream of [child.stdout, child.stderr])
       stream.on("data", (b) => {
         output = (output + b.toString()).slice(-12000);
@@ -49,7 +45,7 @@ export async function fixture(options = {}) {
     child.on("error", (e) => {
       spawnError = e;
     });
-    const deadline = Date.now() + 30000;
+    const deadline = Date.now() + (target === "cloudflare" ? 90000 : 30000);
     while (Date.now() < deadline) {
       if (spawnError || child.exitCode !== null || child.signalCode !== null)
         throw Error("Fallo al iniciar: " + (spawnError?.message || output));
@@ -61,14 +57,10 @@ export async function fixture(options = {}) {
       } catch {}
       await delay(100);
     }
-    throw Error("El servidor no respondió en 30 segundos. " + output);
+    throw Error("El servidor no respondió a tiempo. " + output);
   }
   async function stop() {
-    if (child && child.exitCode === null && child.signalCode === null) {
-      const done = new Promise((r) => child.once("close", r));
-      child.kill();
-      await done;
-    }
+    await stopServer(child);
   }
   async function request(path, method = "GET", body, role = "owner") {
     return fetch(base + "/api" + path, {

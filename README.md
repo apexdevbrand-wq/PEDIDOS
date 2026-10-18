@@ -2,6 +2,10 @@
 
 Aplicación de pedidos de **Los Santos · Drinks, snacks & más** (Minatitlán, Ver.) con tres módulos: cliente, cocina y administración. React, Tailwind, Express y SQLite de Node.js 24. Español, precios MXN y zona horaria configurable.
 
+## Publicar gratis en Cloudflare (versión 0.6)
+
+La rama `cloudflare` corre completa en el plan gratis de Cloudflare, sin servidor propio: interfaz estática, API y base SQLite en un Durable Object, tiempo real por WebSocket y avisos push. Mismo código y mismas pruebas que la versión Node (`npm test` y `npm run test:cloudflare`). Pasos en [CLOUDFLARE.md](CLOUDFLARE.md).
+
 ## Novedades de la versión 0.5 (lanzamiento web)
 
 - **Carta completa** de “¿Qué se te antoja hoy?”: 46 productos activos en Combos, Hamburguesas (pecados capitales), Alitas y boneless (10/15/20 piezas, 300 g/500 g/1 kg y 8 salsas), Diablitros (miches), Drinks, La Elotiza (esquites, elotes con sabrita, charolas) y Mariscos (aguachile con promoción de 2 micheladas por $150). Dos combos que en la carta aparecen atenuados quedan **archivados**: se reactivan en Catálogo → Archivados.
