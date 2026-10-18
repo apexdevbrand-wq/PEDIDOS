@@ -1,6 +1,7 @@
 import { ensureStopped } from "../server/lock.js";
 try {
   ensureStopped();
+  await import("../server/store.js");
   const { resetOwnerFromEnvironment } = await import("../server/auth.js");
   await resetOwnerFromEnvironment();
   console.log(

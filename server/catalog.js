@@ -2,15 +2,9 @@
 // Nada se borra de forma definitiva si ya forma parte del historial: los
 // productos se archivan (dejan de venderse, pero los pedidos anteriores
 // conservan su nombre y precio) y las categorías solo se eliminan vacías.
-import express from "express";
-import { mkdirSync, writeFileSync, existsSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
 import { seedCategories } from "./seed.js";
-
-export const UPLOAD_DIR = "data/uploads";
-mkdirSync(UPLOAD_DIR, { recursive: true });
-const MAX_UPLOAD = 3 * 1024 * 1024;
+import { uploads, limits } from "./runtime.js";
+const randomUUID = () => crypto.randomUUID();
 const imagePattern = /^\/(images|uploads)\/[\w.-]{1,120}$/;
 
 const slug = (s) =>
@@ -136,7 +130,7 @@ export function validateProduct(input, state, { partial = false } = {}) {
     const img = input.image ?? "";
     if (typeof img !== "string" || (img && !imagePattern.test(img)))
       throw Error("Fotografía inválida");
-    if (img.startsWith("/uploads/") && !existsSync(join(UPLOAD_DIR, img.slice(9))))
+    if (img.startsWith("/uploads/") && !uploads.exists(img.slice(9)))
       throw Error("La fotografía ya no existe. Súbela de nuevo.");
     out.image = img;
   }
@@ -173,21 +167,14 @@ function validCategoryName(name, state, except) {
 function sniffImage(buf) {
   if (buf.length < 12) return null;
   if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "jpg";
-  if (buf.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
-    return "png";
-  if (
-    buf.subarray(0, 4).toString("latin1") === "RIFF" &&
-    buf.subarray(8, 12).toString("latin1") === "WEBP"
-  )
-    return "webp";
+  const text = (a, b) => String.fromCharCode(...buf.subarray(a, b));
+  if ([137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => buf[i] === v)) return "png";
+  if (text(0, 4) === "RIFF" && text(8, 12) === "WEBP") return "webp";
   return null;
 }
 
-export function listUploads() {
-  return readdirSync(UPLOAD_DIR).filter((n) => /^[\w-]+\.(jpg|png|webp)$/.test(n));
-}
 
-export function registerCatalog(app, state, { ownerAccess, publish, effective }) {
+export function registerCatalog(app, state, { ownerAccess, publish, effective, raw }) {
   const audit = (req, action, target, details) => ({
     actor: req.actor,
     action,
@@ -197,15 +184,16 @@ export function registerCatalog(app, state, { ownerAccess, publish, effective })
   const fail = (res, e) => res.status(400).json({ error: e.message });
 
   // Fotografías subidas desde el panel. Nombres aleatorios: caché permanente.
-  app.use(
-    "/uploads",
-    express.static(resolve(UPLOAD_DIR), {
-      immutable: true,
-      maxAge: "1y",
-      fallthrough: false,
-      setHeaders: (res) => res.set("X-Content-Type-Options", "nosniff"),
-    }),
-  );
+  app.get("/uploads/:name", (req, res) => {
+    const file = uploads.get(req.params.name);
+    if (!file) return res.sendStatus(404);
+    res.set({
+      "Content-Type": file.type,
+      "Cache-Control": "public, max-age=31536000, immutable",
+      "X-Content-Type-Options": "nosniff",
+    });
+    res.send(file.body);
+  });
 
   app.get("/api/staff/catalog", ownerAccess, (_, res) =>
     res.json({
@@ -372,21 +360,21 @@ export function registerCatalog(app, state, { ownerAccess, publish, effective })
   app.post(
     "/api/staff/uploads",
     ownerAccess,
-    express.raw({
+    raw({
       type: ["image/jpeg", "image/png", "image/webp"],
-      limit: MAX_UPLOAD,
+      limit: limits.maxUpload,
     }),
     (req, res) => {
-      const body = req.body;
-      if (!Buffer.isBuffer(body) || !body.length)
+      const body = req.body instanceof Uint8Array ? req.body : null;
+      if (!body?.length)
         return res.status(400).json({
-          error: "Sube una imagen JPG, PNG o WebP de hasta 3 MB.",
+          error: `Sube una imagen JPG, PNG o WebP de hasta ${limits.maxUpload / 1048576} MB.`,
         });
       const ext = sniffImage(body);
       if (!ext)
         return res.status(400).json({ error: "El archivo no es una imagen JPG, PNG o WebP válida." });
       const name = randomUUID() + "." + ext;
-      writeFileSync(join(UPLOAD_DIR, name), body, { flag: "wx" });
+      uploads.put(name, body, { jpg: "image/jpeg", png: "image/png", webp: "image/webp" }[ext]);
       publish(audit(req, "photo.uploaded", name, { bytes: body.length }));
       res.status(201).json({ url: "/uploads/" + name, bytes: body.length });
     },
@@ -394,7 +382,9 @@ export function registerCatalog(app, state, { ownerAccess, publish, effective })
   // Errores de tamaño/tipo del cuerpo binario en español.
   app.use("/api/staff/uploads", (err, _req, res, next) => {
     if (err?.type === "entity.too.large")
-      return res.status(413).json({ error: "La foto pesa más de 3 MB. Usa una más ligera." });
+      return res
+        .status(413)
+        .json({ error: `La foto pesa más de ${limits.maxUpload / 1048576} MB. Usa una más ligera.` });
     next(err);
   });
 }

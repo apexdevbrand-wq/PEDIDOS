@@ -2,8 +2,6 @@
 // (Cloudflare R2: 10 GB gratis, sin cobro por descarga). Firma AWS SigV4
 // implementada con node:crypto, sin dependencias.
 import { createHash, createHmac } from "node:crypto";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
 
 const sha256 = (data) => createHash("sha256").update(data).digest("hex");
 const hmac = (key, data) => createHmac("sha256", key).update(data).digest();
@@ -89,18 +87,22 @@ export async function putObject(cfg, key, body, contentType = "application/octet
 }
 
 // Sube el respaldo indicado y las fotos que aún no estén fuera del servidor.
-export async function shipBackup({ backupFile, backupName, uploadDir, uploadNames, getMeta, setMeta }) {
+// readBackup / readUpload devuelven { body, type } según la plataforma.
+export async function shipBackup({ backupName, readBackup, uploadNames, readUpload, getMeta, setMeta }) {
   const cfg = offsiteConfig();
   if (!cfg) return { skipped: true };
   const status = getMeta("offsite", {});
   const shipped = new Set(getMeta("offsite_uploads", []));
   try {
-    await putObject(cfg, "backups/" + backupName, readFileSync(backupFile), "application/vnd.sqlite3");
+    const file = readBackup(backupName);
+    if (!file) throw Error("No se encontró el respaldo " + backupName);
+    await putObject(cfg, "backups/" + backupName, file.body, file.type);
     let photos = 0;
     for (const name of uploadNames) {
-      if (shipped.has(name) || !existsSync(join(uploadDir, name))) continue;
-      const ext = name.split(".").pop();
-      await putObject(cfg, "uploads/" + name, readFileSync(join(uploadDir, name)), ext === "jpg" ? "image/jpeg" : "image/" + ext);
+      if (shipped.has(name)) continue;
+      const photo = readUpload(name);
+      if (!photo) continue;
+      await putObject(cfg, "uploads/" + name, photo.body, photo.type);
       shipped.add(name);
       photos++;
     }

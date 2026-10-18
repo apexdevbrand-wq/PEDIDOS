@@ -1,16 +1,43 @@
-import {
-  randomBytes,
-  randomUUID,
-  timingSafeEqual,
-  scrypt as derive,
-} from "node:crypto";
-import { promisify } from "node:util";
-import { db, recordAudit } from "./store.js";
-const scrypt = promisify(derive),
-  sessions = new Map(),
+import { createHash, scrypt as derive } from "node:crypto";
+import { db, platform } from "./runtime.js";
+import { recordAudit } from "./store-core.js";
+const scrypt = (password, salt, length, options) =>
+    new Promise((resolve, reject) =>
+      derive(password, salt, length, options, (e, key) => (e ? reject(e) : resolve(key))),
+    ),
   legacy = new Map(),
   attempts = new Map(),
   TTL = 8 * 60 * 60 * 1000;
+const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
+const randomHex = (n) => hex(crypto.getRandomValues(new Uint8Array(n)));
+const randomUUID = () => crypto.randomUUID();
+const sha256 = (s) => createHash("sha256").update(s).digest("hex");
+function sameText(a, b) {
+  a = String(a);
+  b = String(b);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i++)
+    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return diff === 0;
+}
+// Sesiones guardadas en SQLite: sobreviven reinicios (y en Cloudflare, la
+// hibernación del objeto). Se guarda el hash del token, no el token.
+const sessions = {
+  get(token) {
+    if (!token) return null;
+    const row = db.prepare("SELECT * FROM sessions WHERE id=?").get(sha256(token));
+    return row && { id: row.user_id, version: row.version, expires: row.expires };
+  },
+  set(token, s) {
+    db.prepare("INSERT OR REPLACE INTO sessions VALUES(?,?,?,?)").run(sha256(token), s.id, s.version, s.expires);
+  },
+  delete(token) {
+    if (token) db.prepare("DELETE FROM sessions WHERE id=?").run(sha256(token));
+  },
+  prune() {
+    db.prepare("DELETE FROM sessions WHERE expires<=?").run(Date.now());
+  },
+};
 const publicUser = (u) => ({
   id: u.id,
   username: u.username,
@@ -26,28 +53,39 @@ const byName = (name) =>
       .trim()
       .toLowerCase(),
   );
-async function passwordHash(password, salt) {
-  return Buffer.from(
+// Node: scrypt. Cloudflare: PBKDF2-SHA256 nativo (WebCrypto), que cabe en el
+// tiempo de CPU del plan gratis. El hash guarda su método para verificarlo.
+const PBKDF2 = "pbkdf2-sha256$";
+async function pbkdf2(password, salt, iterations) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: new TextEncoder().encode(salt), iterations },
+    key,
+    256,
+  );
+  return PBKDF2 + iterations + "$" + hex(bits);
+}
+const iterations = () => Number(process.env.PBKDF2_ITERATIONS) || 100000;
+async function passwordHash(password, salt, scheme = platform === "cloudflare" ? "pbkdf2" : "scrypt") {
+  if (scheme === "pbkdf2") return pbkdf2(password, salt, iterations());
+  if (scheme.startsWith(PBKDF2)) return pbkdf2(password, salt, Number(scheme.split("$")[1]));
+  return hex(
     await scrypt(password, salt, 64, {
       N: 16384,
       r: 8,
       p: 1,
       maxmem: 64 * 1024 * 1024,
     }),
-  ).toString("hex");
+  );
 }
 async function verify(password, user) {
+  const stored = user?.password_hash || "";
   const hash = await passwordHash(
     String(password || ""),
     user?.salt || "invalid-account",
+    stored.startsWith(PBKDF2) ? stored : platform === "cloudflare" && !stored ? "pbkdf2" : "scrypt",
   );
-  return (
-    Boolean(user) &&
-    timingSafeEqual(
-      Buffer.from(hash, "hex"),
-      Buffer.from(user.password_hash, "hex"),
-    )
-  );
+  return Boolean(user) && sameText(hash, stored);
 }
 export async function createUser(
   { username, displayName, password, role },
@@ -70,7 +108,7 @@ export async function createUser(
       "Usuario válido, nombre y contraseña de al menos 12 caracteres son obligatorios",
     );
   if (byName(username)) throw Error("Ese usuario ya existe");
-  const salt = randomBytes(16).toString("hex"),
+  const salt = randomHex(16),
     id = randomUUID(),
     hash = await passwordHash(password, salt);
   db.prepare("INSERT INTO users VALUES(?,?,?,?,?,?,?,?,?)").run(
@@ -134,10 +172,7 @@ export function actorOf(req) {
   const token = req.headers.authorization?.replace(/^Bearer /, "");
   if (token) {
     for (const [credential, value] of legacy) {
-      if (
-        Buffer.byteLength(token) === Buffer.byteLength(credential) &&
-        timingSafeEqual(Buffer.from(token), Buffer.from(credential))
-      ) {
+      if (sameText(token, credential)) {
         session = value;
         break;
       }
@@ -210,7 +245,7 @@ export function registerAuth(app) {
               .trim()
           : "";
     const ip =
-      (forwarded || req.socket.remoteAddress || "unknown") +
+      (forwarded || req.socket?.remoteAddress || "unknown") +
       "|" +
       String(req.body?.username || "").trim().toLowerCase().slice(0, 40);
     let attempt = attempts.get(ip);
@@ -249,10 +284,9 @@ export function registerAuth(app) {
         });
       }
       attempts.delete(ip);
-      for (const [id, s] of sessions)
-        if (s.expires <= Date.now()) sessions.delete(id);
+      sessions.prune();
       sessions.delete(sessionId(req));
-      const id = randomBytes(32).toString("hex");
+      const id = randomHex(32);
       sessions.set(id, {
         id: user.id,
         version: user.version,
@@ -330,7 +364,7 @@ export function registerUserRoutes(app, ownerAccess) {
           b.password.length > 256
         )
           throw Error("La contraseña debe tener 12 a 256 caracteres");
-        salt = randomBytes(16).toString("hex");
+        salt = randomHex(16);
         hash = await passwordHash(b.password, salt);
       }
       const latest = byId(user.id);
@@ -401,7 +435,7 @@ export async function resetOwnerFromEnvironment() {
     });
     return;
   }
-  const salt = randomBytes(16).toString("hex"),
+  const salt = randomHex(16),
     hash = await passwordHash(password, salt);
   db.prepare(
     "UPDATE users SET role='owner',active=1,password_hash=?,salt=?,version=version+1 WHERE id=?",

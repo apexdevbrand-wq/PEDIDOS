@@ -1,14 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { recordAudit, getMeta } from "./store-core.js";
 import {
-  db,
   makeBackup,
   listBackups,
-  backupPath,
-  recordAudit,
-  getMeta,
+  readBackup,
   offsiteEnabled,
   shipOffsite,
-} from "./store.js";
+} from "./backups.js";
 import {
   validateSettings,
   validateOptions,
@@ -58,7 +55,7 @@ export function registerManagement(
     const name = req.body.name;
     if (typeof name !== "string" || !name.trim() || name.length > 80)
       return res.status(400).json({ error: "Nombre de insumo inválido" });
-    const item = { id: randomUUID(), name: name.trim(), available: true };
+    const item = { id: crypto.randomUUID(), name: name.trim(), available: true };
     state.ingredients.push(item);
     publish(audit(req, "ingredient.created", item.id));
     res.status(201).json(item);
@@ -218,7 +215,7 @@ export function registerManagement(
         timezone: state.settings.timezone,
       });
     const closure = {
-      id: randomUUID(),
+      id: crypto.randomUUID(),
       requestId: b.requestId,
       from,
       to,
@@ -267,8 +264,12 @@ export function registerManagement(
     }
   });
   app.get("/api/staff/backups/:name", ownerAccess, (req, res) => {
-    const path = backupPath(req.params.name);
-    if (!path) return res.sendStatus(404);
-    res.download(path, req.params.name);
+    const file = readBackup(req.params.name);
+    if (!file) return res.sendStatus(404);
+    res.set({
+      "Content-Type": file.type,
+      "Content-Disposition": `attachment; filename="${req.params.name}"`,
+    });
+    res.send(file.body);
   });
 }

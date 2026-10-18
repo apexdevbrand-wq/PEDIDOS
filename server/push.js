@@ -1,17 +1,16 @@
-import webpush from "web-push";
-import { randomUUID } from "node:crypto";
-import { db, getMeta, setMeta } from "./store.js";
+import { db, push, schedule } from "./runtime.js";
+import { getMeta, setMeta } from "./store-core.js";
 import { orderMessage } from "./messages.js";
-let keys = getMeta("vapid");
-if (!keys) {
-  keys = webpush.generateVAPIDKeys();
-  setMeta("vapid", keys);
+let keys;
+async function vapid() {
+  keys ??= getMeta("vapid");
+  if (!keys) {
+    keys = await push.generateKeys();
+    setMeta("vapid", keys);
+  }
+  return keys;
 }
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT || "mailto:pedidos@example.com",
-  keys.publicKey,
-  keys.privateKey,
-);
+const subject = () => process.env.VAPID_SUBJECT || "mailto:pedidos@example.com";
 export function validSubscription(s) {
   try {
     const u = new URL(s.endpoint),
@@ -46,7 +45,7 @@ export function queueOrderNotification(order, settings) {
   db.prepare(
     "INSERT INTO push_jobs(id,order_id,payload,created_at) VALUES(?,?,?,?)",
   ).run(
-    randomUUID(),
+    crypto.randomUUID(),
     order.id,
     JSON.stringify({
       title: `${settings.businessName} · ${order.folio}`,
@@ -56,13 +55,14 @@ export function queueOrderNotification(order, settings) {
     }),
     new Date().toISOString(),
   );
-  void deliver().catch(() => {});
+  schedule.soon(deliver());
 }
 let running = false;
 export async function deliver() {
-  if (running) return;
+  if (running) return true;
   running = true;
   try {
+    const { publicKey, privateKey } = await vapid();
     const jobs = db
       .prepare(
         "SELECT * FROM push_jobs WHERE status='queued' AND attempts<3 ORDER BY created_at LIMIT 20",
@@ -75,11 +75,12 @@ export async function deliver() {
       let retry = false;
       for (const row of subscriptions) {
         try {
-          await webpush.sendNotification(
-            JSON.parse(row.subscription),
-            job.payload,
-            { TTL: 3600, timeout: 10000 },
-          );
+          await push.send(JSON.parse(row.subscription), job.payload, {
+            TTL: 3600,
+            publicKey,
+            privateKey,
+            subject: subject(),
+          });
         } catch (e) {
           if ([404, 410].includes(e.statusCode))
             db.prepare(
@@ -96,12 +97,18 @@ export async function deliver() {
         job.id,
       );
     }
+    // ¿Quedan avisos por reintentar? En Cloudflare se programa una alarma.
+    const left = db
+      .prepare("SELECT 1 FROM push_jobs WHERE status='queued' AND attempts<3 LIMIT 1")
+      .get();
+    if (left) schedule.kick("push", 30000);
+    return Boolean(left);
   } finally {
     running = false;
   }
 }
 export function registerPush(app, state) {
-  app.get("/api/push/key", (_, res) => res.json({ publicKey: keys.publicKey }));
+  app.get("/api/push/key", async (_, res) => res.json({ publicKey: (await vapid()).publicKey }));
   app.post("/api/orders/:id/push", (req, res) => {
     const order = state.orders.find((o) => o.id === req.params.id);
     if (!order) return res.sendStatus(404);
@@ -141,7 +148,6 @@ export function registerPush(app, state) {
     ).run(req.params.id, String(req.body?.endpoint || ""));
     res.json({ subscribed: false });
   });
-  const timer = setInterval(() => void deliver().catch(() => {}), 30000);
-  timer.unref();
-  void deliver().catch(() => {});
+  schedule.every("push", 30000, deliver);
+  schedule.soon(deliver());
 }
