@@ -13,7 +13,7 @@ Límites del plan gratis que aplican (revisados en octubre de 2026): 100 000 pet
 ## Publicar desde GitHub (recomendado)
 
 1. Entra a **dash.cloudflare.com** → **Workers y Pages** → **Crear** → **Importar un repositorio**.
-2. Conecta GitHub y elige `apexdevbrand-wq/pedidos`, rama **`cloudflare`**.
+2. Conecta GitHub y elige `apexdevbrand-wq/pedidos`, rama **`cloudflare-workers`**.
 3. Configuración de compilación:
    - Nombre del proyecto: `los-santos` (debe coincidir con `wrangler.jsonc`).
    - Comando de compilación: `npm run build`

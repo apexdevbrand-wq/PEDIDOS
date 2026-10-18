@@ -4,7 +4,7 @@ Aplicación de pedidos de **Los Santos · Drinks, snacks & más** (Minatitlán, 
 
 ## Publicar gratis en Cloudflare (versión 0.6)
 
-La rama `cloudflare` corre completa en el plan gratis de Cloudflare, sin servidor propio: interfaz estática, API y base SQLite en un Durable Object, tiempo real por WebSocket y avisos push. Mismo código y mismas pruebas que la versión Node (`npm test` y `npm run test:cloudflare`). Pasos en [CLOUDFLARE.md](CLOUDFLARE.md).
+La rama `cloudflare-workers` corre completa en el plan gratis de Cloudflare, sin servidor propio: interfaz estática, API y base SQLite en un Durable Object, tiempo real por WebSocket y avisos push. Mismo código y mismas pruebas que la versión Node (`npm test` y `npm run test:cloudflare`). Pasos en [CLOUDFLARE.md](CLOUDFLARE.md).
 
 ## Novedades de la versión 0.5 (lanzamiento web)
 
